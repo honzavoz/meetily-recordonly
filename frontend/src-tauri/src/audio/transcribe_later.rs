@@ -113,8 +113,46 @@ fn choose_audio_file(folder_path: &Path) -> Option<PathBuf> {
     supported_files.into_iter().next()
 }
 
+fn transcript_file_has_segments(folder_path: &Path) -> bool {
+    let transcript_path = folder_path.join("transcripts.json");
+    let Ok(raw) = fs::read_to_string(transcript_path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+
+    value
+        .get("total_segments")
+        .and_then(|segments| segments.as_u64())
+        .map(|segments| segments > 0)
+        .unwrap_or_else(|| {
+            value
+                .get("segments")
+                .and_then(|segments| segments.as_array())
+                .map(|segments| !segments.is_empty())
+                .unwrap_or(false)
+        })
+}
+
+fn metadata_has_imported_meeting_id(folder_path: &Path) -> bool {
+    let metadata_path = folder_path.join("metadata.json");
+    let Ok(raw) = fs::read_to_string(metadata_path) else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return false;
+    };
+
+    value
+        .get("meeting_id")
+        .and_then(|meeting_id| meeting_id.as_str())
+        .map(|meeting_id| !meeting_id.trim().is_empty())
+        .unwrap_or(false)
+}
+
 fn has_completed_import_artifacts(folder_path: &Path) -> bool {
-    folder_path.join("transcripts.json").exists() || folder_path.join("metadata.json").exists()
+    transcript_file_has_segments(folder_path) || metadata_has_imported_meeting_id(folder_path)
 }
 
 fn is_unchanged(recording: &TranscribeLaterRecording, entry: &TranscribeLaterIndexEntry) -> bool {
