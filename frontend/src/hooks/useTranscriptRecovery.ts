@@ -10,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { indexedDBService, MeetingMetadata, StoredTranscript } from '@/services/indexedDBService';
 import { storageService } from '@/services/storageService';
 import { applyPinnedSummaryLanguageToMeeting } from '@/lib/summary-language-preferences';
+import { isRecoverableTranscriptMeeting } from '@/lib/transcript-recovery';
 import { toast } from 'sonner';
 
 interface AudioRecoveryStatus {
@@ -54,10 +55,23 @@ export function useTranscriptRecovery(): UseTranscriptRecoveryReturn {
         const isOldEnough = m.lastUpdated < secondsAgo; // Older than 15 seconds
         return isWithinRetention && isOldEnough;
       });
+      const recoverableTranscriptMeetings: MeetingMetadata[] = [];
+
+      for (const meeting of recentMeetings) {
+        if (isRecoverableTranscriptMeeting(meeting)) {
+          recoverableTranscriptMeetings.push(meeting);
+        } else {
+          try {
+            await indexedDBService.deleteMeeting(meeting.meetingId);
+          } catch (error) {
+            console.warn('Failed to delete empty recovery meeting:', error);
+          }
+        }
+      }
 
       // Verify audio checkpoint availability for each meeting
       const meetingsWithAudioStatus = await Promise.all(
-        recentMeetings.map(async (meeting) => {
+        recoverableTranscriptMeetings.map(async (meeting) => {
           if (meeting.folderPath) {
             try {
               const hasAudio = await invoke<boolean>('has_audio_checkpoints', {

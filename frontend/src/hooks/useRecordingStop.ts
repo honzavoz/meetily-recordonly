@@ -7,6 +7,7 @@ import { useTranscripts } from '@/contexts/TranscriptContext';
 import { useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { useRecordingState, RecordingStatus } from '@/contexts/RecordingStateContext';
 import { storageService } from '@/services/storageService';
+import { indexedDBService } from '@/services/indexedDBService';
 import { transcriptService } from '@/services/transcriptService';
 import Analytics from '@/lib/analytics';
 import {
@@ -182,6 +183,14 @@ export function useRecordingStop(
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
         const audioPath = sessionStorage.getItem('last_recording_audio_file')
           ?? (folderPath ? `${folderPath}/audio.mp4` : null);
+        const recoveryMeetingId = sessionStorage.getItem('indexeddb_current_meeting_id');
+        if (recoveryMeetingId) {
+          try {
+            await indexedDBService.deleteMeeting(recoveryMeetingId);
+          } catch (error) {
+            console.warn('Failed to delete record-only recovery metadata:', error);
+          }
+        }
         setStatus(RecordingStatus.COMPLETED);
         toast.success('Audio recording saved', {
           description: 'Live transcription was off. Opening Import Audio for this recording.',
@@ -205,6 +214,7 @@ export function useRecordingStop(
         sessionStorage.removeItem('last_recording_meeting_name');
         sessionStorage.removeItem('last_recording_audio_file');
         sessionStorage.removeItem('last_recording_live_transcription_enabled');
+        sessionStorage.removeItem('indexeddb_current_meeting_id');
         clearTranscripts();
         setIsMeetingActive(false);
         setIsRecordingDisabled(false);
