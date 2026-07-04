@@ -11,11 +11,17 @@ use log::error;
 #[cfg(target_os = "macos")]
 use crate::audio::capture::AudioCaptureBackend;
 
+fn default_live_transcription_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RecordingPreferences {
     pub save_folder: PathBuf,
     pub auto_save: bool,
     pub file_format: String,
+    #[serde(default = "default_live_transcription_enabled")]
+    pub live_transcription_enabled: bool,
     #[serde(default)]
     pub preferred_mic_device: Option<String>,
     #[serde(default)]
@@ -31,6 +37,7 @@ impl Default for RecordingPreferences {
             save_folder: get_default_recordings_folder(),
             auto_save: true,
             file_format: "mp4".to_string(),
+            live_transcription_enabled: true,
             preferred_mic_device: None,
             preferred_system_device: None,
             #[cfg(target_os = "macos")]
@@ -128,8 +135,8 @@ pub async fn load_recording_preferences<R: Runtime>(
         RecordingPreferences::default()
     };
 
-    info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}",
-          prefs.save_folder, prefs.auto_save, prefs.file_format,
+    info!("Loaded recording preferences: save_folder={:?}, auto_save={}, format={}, live_transcription={}, mic={:?}, system={:?}",
+          prefs.save_folder, prefs.auto_save, prefs.file_format, prefs.live_transcription_enabled,
           prefs.preferred_mic_device, prefs.preferred_system_device);
     Ok(prefs)
 }
@@ -139,8 +146,8 @@ pub async fn save_recording_preferences<R: Runtime>(
     app: &AppHandle<R>,
     preferences: &RecordingPreferences,
 ) -> Result<()> {
-    info!("Saving recording preferences: save_folder={:?}, auto_save={}, format={}, mic={:?}, system={:?}",
-          preferences.save_folder, preferences.auto_save, preferences.file_format,
+    info!("Saving recording preferences: save_folder={:?}, auto_save={}, format={}, live_transcription={}, mic={:?}, system={:?}",
+          preferences.save_folder, preferences.auto_save, preferences.file_format, preferences.live_transcription_enabled,
           preferences.preferred_mic_device, preferences.preferred_system_device);
 
     // Get or create store
@@ -384,4 +391,3 @@ pub async fn get_audio_backend_info() -> Result<Vec<BackendInfo>, String> {
         }])
     }
 }
-

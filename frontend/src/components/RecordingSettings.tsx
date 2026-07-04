@@ -12,6 +12,7 @@ export interface RecordingPreferences {
   file_format: string;
   preferred_mic_device: string | null;
   preferred_system_device: string | null;
+  live_transcription_enabled?: boolean;
 }
 
 interface RecordingSettingsProps {
@@ -24,7 +25,8 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
     auto_save: true,
     file_format: 'mp4',
     preferred_mic_device: null,
-    preferred_system_device: null
+    preferred_system_device: null,
+    live_transcription_enabled: true
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -69,12 +71,31 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
   }, []);
 
   const handleAutoSaveToggle = async (enabled: boolean) => {
+    if (!enabled && preferences.live_transcription_enabled === false) {
+      toast.info('Audio saving is required for record-only mode');
+      return;
+    }
+
     const newPreferences = { ...preferences, auto_save: enabled };
     setPreferences(newPreferences);
     await savePreferences(newPreferences);
 
     // Track auto-save setting change
     await Analytics.track('auto_save_recording_toggled', {
+      enabled: enabled.toString()
+    });
+  };
+
+  const handleLiveTranscriptionToggle = async (enabled: boolean) => {
+    const newPreferences = {
+      ...preferences,
+      live_transcription_enabled: enabled,
+      auto_save: enabled ? preferences.auto_save : true,
+    };
+    setPreferences(newPreferences);
+    await savePreferences(newPreferences);
+
+    await Analytics.track('live_transcription_toggled', {
       enabled: enabled.toString()
     });
   };
@@ -172,6 +193,21 @@ export function RecordingSettings({ onSave }: RecordingSettingsProps) {
         <Switch
           checked={preferences.auto_save}
           onCheckedChange={handleAutoSaveToggle}
+          disabled={saving || preferences.live_transcription_enabled === false}
+        />
+      </div>
+
+      {/* Live Transcription Toggle */}
+      <div className="flex items-center justify-between p-4 border rounded-lg">
+        <div className="flex-1">
+          <div className="font-medium">Live Transcription</div>
+          <div className="text-sm text-gray-600">
+            Turn this off to record audio only and transcribe later with Import Audio
+          </div>
+        </div>
+        <Switch
+          checked={preferences.live_transcription_enabled !== false}
+          onCheckedChange={handleLiveTranscriptionToggle}
           disabled={saving}
         />
       </div>

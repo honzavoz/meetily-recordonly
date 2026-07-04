@@ -37,6 +37,7 @@ pub use super::transcription::TranscriptUpdate;
 
 // Simple recording state tracking
 static IS_RECORDING: AtomicBool = AtomicBool::new(false);
+static ACTIVE_LIVE_TRANSCRIPTION_ENABLED: AtomicBool = AtomicBool::new(true);
 
 // Global recording manager and transcription task to keep them alive during recording
 static RECORDING_MANAGER: Mutex<Option<RecordingManager>> = Mutex::new(None);
@@ -89,42 +90,51 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
-    // Validate that transcription models are available before starting recording
-    info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
+    // Load recording preferences to get auto_save, device preferences and recording mode.
+    let (auto_save, preferred_mic_name, preferred_system_name, live_transcription_enabled) =
+        match super::recording_preferences::load_recording_preferences(&app).await {
+            Ok(prefs) => {
+                info!("📋 Loaded recording preferences: auto_save={}, live_transcription={}, preferred_mic={:?}, preferred_system={:?}",
+                      prefs.auto_save, prefs.live_transcription_enabled, prefs.preferred_mic_device, prefs.preferred_system_device);
+                (
+                    prefs.auto_save,
+                    prefs.preferred_mic_device,
+                    prefs.preferred_system_device,
+                    prefs.live_transcription_enabled,
+                )
+            }
+            Err(e) => {
+                warn!("Failed to load recording preferences, using defaults: {}", e);
+                (true, None, None, true)
+            }
+        };
 
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
+    // Validate transcription model availability only when live transcription is enabled.
+    if live_transcription_enabled {
+        info!("🔍 Validating transcription model availability before starting recording...");
+        if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
+            error!("Model validation failed: {}", validation_error);
 
-        return Err(validation_error);
+            // Emit error event for frontend - actionable: false to show toast instead of modal
+            // (download progress is already shown in top-right toast)
+            let _ = app.emit("transcription-error", serde_json::json!({
+                "error": validation_error,
+                "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+                "actionable": false
+            }));
+
+            return Err(validation_error);
+        }
+        info!("✅ Transcription model validation passed");
+    } else {
+        info!("🎙️ Record-only mode enabled: skipping transcription model validation");
     }
-    info!("✅ Transcription model validation passed");
 
     // Async-first approach - no more blocking operations!
     info!("🚀 Starting async recording initialization");
 
     // Create new recording manager
     let mut manager = RecordingManager::new();
-
-    // Load recording preferences to get auto_save AND device preferences
-    let (auto_save, preferred_mic_name, preferred_system_name) =
-        match super::recording_preferences::load_recording_preferences(&app).await {
-            Ok(prefs) => {
-                info!("📋 Loaded recording preferences: auto_save={}, preferred_mic={:?}, preferred_system={:?}",
-                      prefs.auto_save, prefs.preferred_mic_device, prefs.preferred_system_device);
-                (prefs.auto_save, prefs.preferred_mic_device, prefs.preferred_system_device)
-            }
-            Err(e) => {
-                warn!("Failed to load recording preferences, using defaults: {}", e);
-                (true, None, None)
-            }
-        };
 
     // ============================================================================
     // MICROPHONE DEVICE RESOLUTION: Preference → Default → Error
@@ -234,7 +244,12 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
 
     // Start recording with resolved devices (replaces start_recording_with_defaults_and_auto_save call)
     let transcription_receiver = manager
-        .start_recording(microphone_device, system_device, auto_save)
+        .start_recording(
+            microphone_device,
+            system_device,
+            auto_save,
+            live_transcription_enabled,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -247,54 +262,61 @@ pub async fn start_recording_with_meeting_name<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    ACTIVE_LIVE_TRANSCRIPTION_ENABLED.store(live_transcription_enabled, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
-    reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    if live_transcription_enabled {
+        reset_speech_detected_flag(); // Reset for new recording session
 
-    // CRITICAL: Listen for transcript-update events and save to recording manager
-    // This enables transcript history persistence for page reload sync
-    // Store listener ID for cleanup during stop_recording to ensure microphone is released
-    {
-        use tauri::Listener;
-        let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                };
+        // Start optimized parallel transcription task and store handle
+        let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
+        {
+            let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+            *global_task = Some(task_handle);
+        }
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
+        // CRITICAL: Listen for transcript-update events and save to recording manager
+        // This enables transcript history persistence for page reload sync
+        // Store listener ID for cleanup during stop_recording to ensure microphone is released
+        {
+            use tauri::Listener;
+            let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
+                // Parse the transcript update from the event payload
+                if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+                    // Create structured transcript segment
+                    let segment = crate::audio::recording_saver::TranscriptSegment {
+                        id: format!("seg_{}", update.sequence_id),
+                        text: update.text.clone(),
+                        audio_start_time: update.audio_start_time,
+                        audio_end_time: update.audio_end_time,
+                        duration: update.duration,
+                        display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
+                        confidence: update.confidence,
+                        sequence_id: update.sequence_id,
+                    };
+
+                    // Save to recording manager
+                    if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
+                        if let Some(manager) = manager_guard.as_ref() {
+                            manager.add_transcript_segment(segment);
+                        }
                     }
                 }
-            }
-        });
-        let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
-        *global_listener = Some(listener_id);
-        info!("✅ Transcript-update event listener registered for history persistence");
+            });
+            let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
+            *global_listener = Some(listener_id);
+            info!("✅ Transcript-update event listener registered for history persistence");
+        }
+    } else {
+        info!("🎙️ Record-only mode: transcription worker and transcript listener not started");
     }
 
     // Emit success event
     app.emit("recording-started", serde_json::json!({
         "message": "Recording started successfully with parallel processing",
         "devices": ["Default Microphone", "Default System Audio"],
-        "workers": 3
+        "workers": if live_transcription_enabled { 3 } else { 0 },
+        "live_transcription_enabled": live_transcription_enabled
     })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect recording state
@@ -335,22 +357,42 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
         return Err("Recording already in progress".to_string());
     }
 
-    // Validate that transcription models are available before starting recording
-    info!("🔍 Validating transcription model availability before starting recording...");
-    if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
-        error!("Model validation failed: {}", validation_error);
+    // Load recording preferences to check auto_save setting and active recording mode.
+    let (auto_save, live_transcription_enabled) =
+        match super::recording_preferences::load_recording_preferences(&app).await {
+            Ok(prefs) => {
+                info!(
+                    "📋 Loaded recording preferences: auto_save={}, live_transcription={}",
+                    prefs.auto_save, prefs.live_transcription_enabled
+                );
+                (prefs.auto_save, prefs.live_transcription_enabled)
+            }
+            Err(e) => {
+                warn!("Failed to load recording preferences, defaulting to auto_save=true/live_transcription=true: {}", e);
+                (true, true)
+            }
+        };
 
-        // Emit error event for frontend - actionable: false to show toast instead of modal
-        // (download progress is already shown in top-right toast)
-        let _ = app.emit("transcription-error", serde_json::json!({
-            "error": validation_error,
-            "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
-            "actionable": false
-        }));
+    // Validate transcription model availability only when live transcription is enabled.
+    if live_transcription_enabled {
+        info!("🔍 Validating transcription model availability before starting recording...");
+        if let Err(validation_error) = transcription::validate_transcription_model_ready(&app).await {
+            error!("Model validation failed: {}", validation_error);
 
-        return Err(validation_error);
+            // Emit error event for frontend - actionable: false to show toast instead of modal
+            // (download progress is already shown in top-right toast)
+            let _ = app.emit("transcription-error", serde_json::json!({
+                "error": validation_error,
+                "userMessage": "Recording cannot start: Transcription model is still downloading. Please wait for the download to complete.",
+                "actionable": false
+            }));
+
+            return Err(validation_error);
+        }
+        info!("✅ Transcription model validation passed");
+    } else {
+        info!("🎙️ Record-only mode enabled: skipping transcription model validation");
     }
-    info!("✅ Transcription model validation passed");
 
     // Parse devices
     let mic_device = if let Some(ref name) = mic_device_name {
@@ -375,18 +417,6 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Create new recording manager
     let mut manager = RecordingManager::new();
 
-    // Load recording preferences to check auto_save setting
-    let auto_save = match super::recording_preferences::load_recording_preferences(&app).await {
-        Ok(prefs) => {
-            info!("📋 Loaded recording preferences: auto_save={}", prefs.auto_save);
-            prefs.auto_save
-        }
-        Err(e) => {
-            warn!("Failed to load recording preferences, defaulting to auto_save=true: {}", e);
-            true // Default to saving if preferences can't be loaded
-        }
-    };
-
     // Always ensure a meeting name is set so incremental saver initializes
     let effective_meeting_name = meeting_name.clone().unwrap_or_else(|| {
         let now = chrono::Local::now();
@@ -405,7 +435,12 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
 
     // Start recording with specified devices and auto_save setting
     let transcription_receiver = manager
-        .start_recording(mic_device, system_device, auto_save)
+        .start_recording(
+            mic_device,
+            system_device,
+            auto_save,
+            live_transcription_enabled,
+        )
         .await
         .map_err(|e| format!("Failed to start recording: {}", e))?;
 
@@ -418,47 +453,53 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
     // Set recording flag and reset speech detection flag
     info!("🔍 Setting IS_RECORDING to true and resetting SPEECH_DETECTED_EMITTED");
     IS_RECORDING.store(true, Ordering::SeqCst);
+    ACTIVE_LIVE_TRANSCRIPTION_ENABLED.store(live_transcription_enabled, Ordering::SeqCst);
     drop(engine_lifecycle_guard);
-    reset_speech_detected_flag(); // Reset for new recording session
 
-    // Start optimized parallel transcription task and store handle
-    let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
-    {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        *global_task = Some(task_handle);
-    }
+    if live_transcription_enabled {
+        reset_speech_detected_flag(); // Reset for new recording session
 
-    // CRITICAL: Listen for transcript-update events and save to recording manager
-    // This enables transcript history persistence for page reload sync
-    // Store listener ID for cleanup during stop_recording to ensure microphone is released
-    {
-        use tauri::Listener;
-        let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
-            // Parse the transcript update from the event payload
-            if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
-                // Create structured transcript segment
-                let segment = crate::audio::recording_saver::TranscriptSegment {
-                    id: format!("seg_{}", update.sequence_id),
-                    text: update.text.clone(),
-                    audio_start_time: update.audio_start_time,
-                    audio_end_time: update.audio_end_time,
-                    duration: update.duration,
-                    display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
-                    confidence: update.confidence,
-                    sequence_id: update.sequence_id,
-                };
+        // Start optimized parallel transcription task and store handle
+        let task_handle = transcription::start_transcription_task(app.clone(), transcription_receiver);
+        {
+            let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+            *global_task = Some(task_handle);
+        }
 
-                // Save to recording manager
-                if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
-                    if let Some(manager) = manager_guard.as_ref() {
-                        manager.add_transcript_segment(segment);
+        // CRITICAL: Listen for transcript-update events and save to recording manager
+        // This enables transcript history persistence for page reload sync
+        // Store listener ID for cleanup during stop_recording to ensure microphone is released
+        {
+            use tauri::Listener;
+            let listener_id = app.listen("transcript-update", move |event: tauri::Event| {
+                // Parse the transcript update from the event payload
+                if let Ok(update) = serde_json::from_str::<TranscriptUpdate>(event.payload()) {
+                    // Create structured transcript segment
+                    let segment = crate::audio::recording_saver::TranscriptSegment {
+                        id: format!("seg_{}", update.sequence_id),
+                        text: update.text.clone(),
+                        audio_start_time: update.audio_start_time,
+                        audio_end_time: update.audio_end_time,
+                        duration: update.duration,
+                        display_time: update.timestamp.clone(), // Use wall-clock timestamp for display
+                        confidence: update.confidence,
+                        sequence_id: update.sequence_id,
+                    };
+
+                    // Save to recording manager
+                    if let Ok(manager_guard) = RECORDING_MANAGER.lock() {
+                        if let Some(manager) = manager_guard.as_ref() {
+                            manager.add_transcript_segment(segment);
+                        }
                     }
                 }
-            }
-        });
-        let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
-        *global_listener = Some(listener_id);
-        info!("✅ Transcript-update event listener registered for history persistence");
+            });
+            let mut global_listener = TRANSCRIPT_LISTENER_ID.lock().unwrap();
+            *global_listener = Some(listener_id);
+            info!("✅ Transcript-update event listener registered for history persistence");
+        }
+    } else {
+        info!("🎙️ Record-only mode: transcription worker and transcript listener not started");
     }
 
     // Emit success event
@@ -468,7 +509,8 @@ pub async fn start_recording_with_devices_and_meeting<R: Runtime>(
             mic_device_name.unwrap_or_else(|| "Default Microphone".to_string()),
             system_device_name.unwrap_or_else(|| "Default System Audio".to_string())
         ],
-        "workers": 3
+        "workers": if live_transcription_enabled { 3 } else { 0 },
+        "live_transcription_enabled": live_transcription_enabled
     })).map_err(|e| e.to_string())?;
 
     // Update tray menu to reflect recording state
@@ -493,6 +535,12 @@ pub async fn stop_recording<R: Runtime>(
         info!("Recording was not active");
         return Ok(());
     }
+
+    let live_transcription_enabled = ACTIVE_LIVE_TRANSCRIPTION_ENABLED.load(Ordering::SeqCst);
+    info!(
+        "🛑 Active recording mode: live_transcription={}",
+        live_transcription_enabled
+    );
 
     // Emit shutdown progress to frontend
     let _ = app.emit(
@@ -554,60 +602,69 @@ pub async fn stop_recording<R: Runtime>(
         }),
     );
 
-    // Wait for transcription task with enhanced progress monitoring (NO TIMEOUT - we must process all chunks)
-    let transcription_task = {
-        let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
-        global_task.take()
-    };
+    if live_transcription_enabled {
+        // Wait for transcription task with enhanced progress monitoring (NO TIMEOUT - we must process all chunks)
+        let transcription_task = {
+            let mut global_task = TRANSCRIPTION_TASK.lock().unwrap();
+            global_task.take()
+        };
 
-    if let Some(task_handle) = transcription_task {
-        info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
+        if let Some(task_handle) = transcription_task {
+            info!("⏳ Waiting for ALL transcription chunks to be processed (no timeout - preserving every chunk)");
 
-        // Enhanced progress monitoring during shutdown
-        let progress_app = app.clone();
-        let progress_task = tokio::spawn(async move {
-            let last_update = std::time::Instant::now();
+            // Enhanced progress monitoring during shutdown
+            let progress_app = app.clone();
+            let progress_task = tokio::spawn(async move {
+                let last_update = std::time::Instant::now();
 
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-                // Emit periodic progress updates during shutdown
-                let elapsed = last_update.elapsed().as_secs();
-                let _ = progress_app.emit(
-                    "recording-shutdown-progress",
-                    serde_json::json!({
-                        "stage": "processing_transcripts",
-                        "message": format!("Processing transcripts... ({}s elapsed)", elapsed),
-                        "progress": 40,
-                        "detailed": true,
-                        "elapsed_seconds": elapsed
-                    }),
-                );
+                    // Emit periodic progress updates during shutdown
+                    let elapsed = last_update.elapsed().as_secs();
+                    let _ = progress_app.emit(
+                        "recording-shutdown-progress",
+                        serde_json::json!({
+                            "stage": "processing_transcripts",
+                            "message": format!("Processing transcripts... ({}s elapsed)", elapsed),
+                            "progress": 40,
+                            "detailed": true,
+                            "elapsed_seconds": elapsed
+                        }),
+                    );
+                }
+            });
+
+            // Wait up to 10 minutes for transcription completion to prevent indefinite hangs
+            match tokio::time::timeout(
+                tokio::time::Duration::from_secs(600), // 10 minutes max
+                task_handle
+            ).await {
+                Ok(Ok(())) => {
+                    info!("✅ ALL transcription chunks processed successfully - no data lost");
+                }
+                Ok(Err(e)) => {
+                    warn!("⚠️ Transcription task completed with error: {:?}", e);
+                    // Continue anyway - the worker may have processed most chunks
+                }
+                Err(_) => {
+                    warn!("⏱️ Transcription timeout (10 minutes) reached, continuing shutdown to prevent indefinite hang");
+                    // Continue shutdown even on timeout - better to lose some chunks than hang forever
+                }
             }
-        });
 
-        // Wait up to 10 minutes for transcription completion to prevent indefinite hangs
-        match tokio::time::timeout(
-            tokio::time::Duration::from_secs(600), // 10 minutes max
-            task_handle
-        ).await {
-            Ok(Ok(())) => {
-                info!("✅ ALL transcription chunks processed successfully - no data lost");
-            }
-            Ok(Err(e)) => {
-                warn!("⚠️ Transcription task completed with error: {:?}", e);
-                // Continue anyway - the worker may have processed most chunks
-            }
-            Err(_) => {
-                warn!("⏱️ Transcription timeout (10 minutes) reached, continuing shutdown to prevent indefinite hang");
-                // Continue shutdown even on timeout - better to lose some chunks than hang forever
-            }
+            // Stop progress monitoring
+            progress_task.abort();
+        } else {
+            info!("ℹ️ No transcription task found to wait for");
         }
-
-        // Stop progress monitoring
-        progress_task.abort();
     } else {
-        info!("ℹ️ No transcription task found to wait for");
+        if let Some(task_handle) = TRANSCRIPTION_TASK.lock().unwrap().take() {
+            task_handle.abort();
+            info!("🎙️ Record-only mode: aborted unexpected transcription task");
+        } else {
+            info!("🎙️ Record-only mode: skipping transcription worker wait");
+        }
     }
 
     // Step 3: Now safely unload Whisper model after ALL chunks are processed
@@ -623,26 +680,31 @@ pub async fn stop_recording<R: Runtime>(
     info!("🧠 All transcript chunks processed. Now safely unloading transcription model...");
 
     // Determine which provider was used and unload the appropriate model (with timeout)
-    let config = match tokio::time::timeout(
-        tokio::time::Duration::from_secs(30), // 30 seconds max for DB operation
-        crate::api::api::api_get_transcript_config(
-            app.clone(),
-            app.clone().state(),
-            None,
+    let config = if live_transcription_enabled {
+        match tokio::time::timeout(
+            tokio::time::Duration::from_secs(30), // 30 seconds max for DB operation
+            crate::api::api::api_get_transcript_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
         )
-    )
-    .await
-    {
-        Ok(Ok(Some(config))) => Some(config.provider),
-        Ok(Ok(None)) => None,
-        Ok(Err(e)) => {
-            warn!("⚠️ Failed to get transcript config: {:?}", e);
-            None
+        .await
+        {
+            Ok(Ok(Some(config))) => Some(config.provider),
+            Ok(Ok(None)) => None,
+            Ok(Err(e)) => {
+                warn!("⚠️ Failed to get transcript config: {:?}", e);
+                None
+            }
+            Err(_) => {
+                warn!("⏱️ Transcript config timeout (30s), continuing shutdown");
+                None
+            }
         }
-        Err(_) => {
-            warn!("⏱️ Transcript config timeout (30s), continuing shutdown");
-            None
-        }
+    } else {
+        info!("🎙️ Record-only mode: skipping transcription model unload");
+        None
     };
 
     match config.as_deref() {
@@ -670,6 +732,9 @@ pub async fn stop_recording<R: Runtime>(
             } else {
                 warn!("⚠️ No Parakeet engine found to unload model");
             }
+        }
+        None if !live_transcription_enabled => {
+            info!("🎙️ Record-only mode: no transcription model was loaded");
         }
         _ => {
             // Default to Whisper
@@ -740,15 +805,19 @@ pub async fn stop_recording<R: Runtime>(
         }
 
         // Get transcription model info (already loaded above for model unload)
-        let transcription_config = match crate::api::api::api_get_transcript_config(
-            app.clone(),
-            app.clone().state(),
-            None,
-        )
-        .await
-        {
-            Ok(Some(config)) => Some((config.provider, config.model)),
-            _ => None,
+        let transcription_config = if live_transcription_enabled {
+            match crate::api::api::api_get_transcript_config(
+                app.clone(),
+                app.clone().state(),
+                None,
+            )
+            .await
+            {
+                Ok(Some(config)) => Some((config.provider, config.model)),
+                _ => None,
+            }
+        } else {
+            Some(("record-only".to_string(), "none".to_string()))
         };
 
         let (transcription_provider, transcription_model) = transcription_config
@@ -849,6 +918,7 @@ pub async fn stop_recording<R: Runtime>(
     // Set recording flag to false
     info!("🔍 Setting IS_RECORDING to false");
     IS_RECORDING.store(false, Ordering::SeqCst);
+    ACTIVE_LIVE_TRANSCRIPTION_ENABLED.store(true, Ordering::SeqCst);
 
     // Step 4.5: Prepare metadata for frontend (NO database save)
     // NOTE: We do NOT save to database here. The frontend will save after all transcripts are displayed.
@@ -884,7 +954,8 @@ pub async fn stop_recording<R: Runtime>(
         serde_json::json!({
             "message": "Recording stopped - frontend will save after all transcripts received",
             "folder_path": folder_path_str,
-            "meeting_name": meeting_name_str
+            "meeting_name": meeting_name_str,
+            "live_transcription_enabled": live_transcription_enabled
         }),
     )
     .map_err(|e| e.to_string())?;

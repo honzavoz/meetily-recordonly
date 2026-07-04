@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { toast } from 'sonner';
 import { useTranscripts } from '@/contexts/TranscriptContext';
@@ -12,6 +13,10 @@ import {
   applyPinnedSummaryLanguageToMeeting,
   detectAndCacheSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import {
+  getLiveTranscriptionEnabled,
+  shouldPersistTranscriptMeeting,
+} from '@/lib/recording-mode';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -75,6 +80,16 @@ export function useRecordingStop(
   // Promise to track recording-stopped event data (fixes race condition with recording-stop-complete)
   const recordingStoppedDataRef = useRef<Promise<void> | null>(null);
 
+  const loadLiveTranscriptionEnabled = useCallback(async (): Promise<boolean> => {
+    try {
+      const preferences = await invoke('get_recording_preferences');
+      return getLiveTranscriptionEnabled(preferences as any);
+    } catch (error) {
+      console.error('Failed to load recording mode preferences:', error);
+      return true;
+    }
+  }, []);
+
   // Set up recording-stopped listener for meeting navigation
   useEffect(() => {
     let unlistenFn: (() => void) | undefined;
@@ -86,10 +101,11 @@ export function useRecordingStop(
           message: string;
           folder_path?: string;
           meeting_name?: string;
+          live_transcription_enabled?: boolean;
         }>('recording-stopped', async (event) => {
           // Create promise that resolves when sessionStorage is set (prevents race condition)
           recordingStoppedDataRef.current = (async () => {
-            const { folder_path, meeting_name } = event.payload;
+            const { folder_path, meeting_name, live_transcription_enabled } = event.payload;
 
             // Store folder_path and meeting_name for later use in handleRecordingStop
             if (folder_path) {
@@ -97,6 +113,12 @@ export function useRecordingStop(
             }
             if (meeting_name) {
               sessionStorage.setItem('last_recording_meeting_name', meeting_name);
+            }
+            if (typeof live_transcription_enabled === 'boolean') {
+              sessionStorage.setItem(
+                'last_recording_live_transcription_enabled',
+                String(live_transcription_enabled),
+              );
             }
           })();
 
@@ -144,6 +166,39 @@ export function useRecordingStop(
       // Note: stop_recording is already called by RecordingControls.stopRecordingAction
       // This function only handles post-stop processing (transcription wait, API call, navigation)
       console.log('Recording already stopped by RecordingControls, processing transcription...');
+
+      const storedLiveTranscriptionEnabled = sessionStorage.getItem(
+        'last_recording_live_transcription_enabled',
+      );
+      const liveTranscriptionEnabled = storedLiveTranscriptionEnabled == null
+        ? await loadLiveTranscriptionEnabled()
+        : storedLiveTranscriptionEnabled !== 'false';
+
+      if (!liveTranscriptionEnabled) {
+        const folderPath = sessionStorage.getItem('last_recording_folder_path');
+        setStatus(RecordingStatus.COMPLETED);
+        toast.success('Audio recording saved', {
+          description: 'Live transcription was off. Use Import Audio to transcribe this recording when you are ready.',
+          action: {
+            label: 'Open Folder',
+            onClick: () => {
+              invoke('open_recordings_folder').catch((error) => {
+                console.error('Failed to open recordings folder:', error);
+              });
+            },
+          },
+          duration: 12000,
+        });
+        console.log('Record-only session completed', { folderPath });
+        sessionStorage.removeItem('last_recording_folder_path');
+        sessionStorage.removeItem('last_recording_meeting_name');
+        sessionStorage.removeItem('last_recording_live_transcription_enabled');
+        clearTranscripts();
+        setIsMeetingActive(false);
+        setIsRecordingDisabled(false);
+        setTimeout(() => setStatus(RecordingStatus.IDLE), 1000);
+        return;
+      }
 
       // Wait for transcription to complete
       setStatus(RecordingStatus.PROCESSING_TRANSCRIPTS, 'Waiting for transcription...');
@@ -233,7 +288,7 @@ export function useRecordingStop(
       // Save to SQLite
       // NOTE: enabled to save COMPLETE transcripts after frontend receives all updates
       // This ensures user sees all transcripts streaming in before database save
-      if (isCallApi && transcriptionComplete == true) {
+      if (shouldPersistTranscriptMeeting(isCallApi, liveTranscriptionEnabled, transcriptsRef.current.length) && transcriptionComplete == true) {
 
         setStatus(RecordingStatus.SAVING, 'Saving meeting to database...');
 
@@ -299,6 +354,7 @@ export function useRecordingStop(
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
+          sessionStorage.removeItem('last_recording_live_transcription_enabled');
           // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
           sessionStorage.removeItem('indexeddb_current_meeting_id');
 
@@ -405,6 +461,7 @@ export function useRecordingStop(
         }
       } else {
         // No save needed, go back to IDLE
+        sessionStorage.removeItem('last_recording_live_transcription_enabled');
         setStatus(RecordingStatus.IDLE);
       }
 
@@ -435,6 +492,7 @@ export function useRecordingStop(
     meetings,
     setIsMeetingActive,
     router,
+    loadLiveTranscriptionEnabled,
   ]);
 
   // Expose handleRecordingStop function to window for Rust callbacks
