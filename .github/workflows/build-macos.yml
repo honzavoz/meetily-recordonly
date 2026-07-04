@@ -34,7 +34,7 @@ env:
 jobs:
   build-macos:
     name: Build macOS (Apple Silicon)
-    runs-on: macos-latest
+    runs-on: macos-15
     permissions:
       contents: write
 
@@ -99,7 +99,7 @@ jobs:
         uses: swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          key: macos-latest-aarch64-apple-darwin
+          key: macos-15-aarch64-apple-darwin
 
       - name: Install frontend dependencies
         run: |
