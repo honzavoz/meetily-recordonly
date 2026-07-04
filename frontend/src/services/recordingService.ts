@@ -20,6 +20,7 @@ export interface RecordingStoppedPayload {
   message: string;
   folder_path?: string;
   meeting_name?: string;
+  audio_file?: string;
 }
 
 /**

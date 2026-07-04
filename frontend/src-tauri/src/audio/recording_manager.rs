@@ -503,6 +503,11 @@ impl RecordingManager {
         self.recording_saver.get_meeting_folder().map(|p| p.clone())
     }
 
+    /// Get the saved audio file path for the last finalized recording
+    pub fn get_saved_audio_path(&self) -> Option<std::path::PathBuf> {
+        self.recording_saver.get_saved_audio_path().map(|p| p.clone())
+    }
+
     /// Check for device events (disconnects/reconnects)
     /// Returns Some(DeviceEvent) if an event occurred, None otherwise
     pub fn poll_device_events(&mut self) -> Option<DeviceEvent> {

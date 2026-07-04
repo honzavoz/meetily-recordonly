@@ -101,11 +101,12 @@ export function useRecordingStop(
           message: string;
           folder_path?: string;
           meeting_name?: string;
+          audio_file?: string;
           live_transcription_enabled?: boolean;
         }>('recording-stopped', async (event) => {
           // Create promise that resolves when sessionStorage is set (prevents race condition)
           recordingStoppedDataRef.current = (async () => {
-            const { folder_path, meeting_name, live_transcription_enabled } = event.payload;
+            const { folder_path, meeting_name, audio_file, live_transcription_enabled } = event.payload;
 
             // Store folder_path and meeting_name for later use in handleRecordingStop
             if (folder_path) {
@@ -113,6 +114,9 @@ export function useRecordingStop(
             }
             if (meeting_name) {
               sessionStorage.setItem('last_recording_meeting_name', meeting_name);
+            }
+            if (audio_file) {
+              sessionStorage.setItem('last_recording_audio_file', audio_file);
             }
             if (typeof live_transcription_enabled === 'boolean') {
               sessionStorage.setItem(
@@ -176,7 +180,8 @@ export function useRecordingStop(
 
       if (!liveTranscriptionEnabled) {
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
-        const audioPath = folderPath ? `${folderPath}/audio.mp4` : null;
+        const audioPath = sessionStorage.getItem('last_recording_audio_file')
+          ?? (folderPath ? `${folderPath}/audio.mp4` : null);
         setStatus(RecordingStatus.COMPLETED);
         toast.success('Audio recording saved', {
           description: 'Live transcription was off. Opening Import Audio for this recording.',
@@ -198,6 +203,7 @@ export function useRecordingStop(
         console.log('Record-only session completed', { folderPath, audioPath });
         sessionStorage.removeItem('last_recording_folder_path');
         sessionStorage.removeItem('last_recording_meeting_name');
+        sessionStorage.removeItem('last_recording_audio_file');
         sessionStorage.removeItem('last_recording_live_transcription_enabled');
         clearTranscripts();
         setIsMeetingActive(false);
@@ -360,6 +366,7 @@ export function useRecordingStop(
           // Clean up session storage
           sessionStorage.removeItem('last_recording_folder_path');
           sessionStorage.removeItem('last_recording_meeting_name');
+          sessionStorage.removeItem('last_recording_audio_file');
           sessionStorage.removeItem('last_recording_live_transcription_enabled');
           // Clean up IndexedDB meeting ID (redundant with markMeetingAsSaved cleanup, but ensures cleanup)
           sessionStorage.removeItem('indexeddb_current_meeting_id');

@@ -5,10 +5,10 @@ use log::{info, warn, error};
 use tauri::{AppHandle, Runtime, Emitter};
 use tokio::sync::mpsc;
 use serde::{Serialize, Deserialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::recording_state::AudioChunk;
-use super::audio_processing::create_meeting_folder;
+use super::audio_processing::{create_meeting_folder, sanitize_filename};
 use super::incremental_saver::IncrementalAudioSaver;
 
 /// Structured transcript segment for JSON export
@@ -51,6 +51,7 @@ pub struct RecordingSaver {
     incremental_saver: Option<Arc<AsyncMutex<IncrementalAudioSaver>>>,
     meeting_folder: Option<PathBuf>,
     meeting_name: Option<String>,
+    saved_audio_path: Option<PathBuf>,
     metadata: Option<MeetingMetadata>,
     transcript_segments: Arc<Mutex<Vec<TranscriptSegment>>>,
     chunk_receiver: Option<mpsc::UnboundedReceiver<AudioChunk>>,
@@ -63,6 +64,7 @@ impl RecordingSaver {
             incremental_saver: None,
             meeting_folder: None,
             meeting_name: None,
+            saved_audio_path: None,
             metadata: None,
             transcript_segments: Arc::new(Mutex::new(Vec::new())),
             chunk_receiver: None,
@@ -413,10 +415,31 @@ impl RecordingSaver {
             info!("✅ Transcripts saved and verified at: {}", transcript_path.display());
         }
 
+        let display_audio_path = match create_readable_audio_link(
+            &final_audio_path,
+            self.meeting_folder.as_ref(),
+        ) {
+            Ok(path) => path,
+            Err(e) => {
+                warn!(
+                    "Failed to create readable audio filename, falling back to {}: {}",
+                    final_audio_path.display(),
+                    e
+                );
+                final_audio_path.clone()
+            }
+        };
+        self.saved_audio_path = Some(display_audio_path.clone());
+
         // Update metadata to completed status with actual recording duration
         if let (Some(folder), Some(mut metadata)) = (&self.meeting_folder, self.metadata.clone()) {
             metadata.status = "completed".to_string();
             metadata.completed_at = Some(chrono::Utc::now().to_rfc3339());
+            metadata.audio_file = display_audio_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("audio.mp4")
+                .to_string();
 
             // Use actual recording duration from RecordingState (more accurate than transcript segments)
             // Falls back to last transcript segment if duration not provided
@@ -438,7 +461,7 @@ impl RecordingSaver {
 
         // Emit save event with audio and transcript paths
         let save_event = serde_json::json!({
-            "audio_file": final_audio_path.to_string_lossy(),
+            "audio_file": display_audio_path.to_string_lossy(),
             "transcript_file": self.meeting_folder.as_ref()
                 .map(|f| f.join("transcripts.json").to_string_lossy().to_string()),
             "meeting_name": self.meeting_name,
@@ -455,12 +478,16 @@ impl RecordingSaver {
             segments.clear();
         }
 
-        Ok(Some(final_audio_path.to_string_lossy().to_string()))
+        Ok(Some(display_audio_path.to_string_lossy().to_string()))
     }
 
     /// Get the meeting folder path (for passing to backend)
     pub fn get_meeting_folder(&self) -> Option<&PathBuf> {
         self.meeting_folder.as_ref()
+    }
+
+    pub fn get_saved_audio_path(&self) -> Option<&PathBuf> {
+        self.saved_audio_path.as_ref()
     }
 
     /// Get accumulated transcript segments (for reload sync)
@@ -481,5 +508,81 @@ impl RecordingSaver {
 impl Default for RecordingSaver {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn create_readable_audio_link(
+    original_audio_path: &Path,
+    meeting_folder: Option<&PathBuf>,
+) -> Result<PathBuf> {
+    let Some(folder) = meeting_folder else {
+        return Ok(original_audio_path.to_path_buf());
+    };
+
+    let readable_path = build_readable_audio_path(folder, original_audio_path);
+
+    if readable_path == original_audio_path {
+        return Ok(original_audio_path.to_path_buf());
+    }
+
+    if readable_path.exists() {
+        return Ok(readable_path);
+    }
+
+    std::fs::hard_link(original_audio_path, &readable_path).or_else(|hard_link_error| {
+        warn!(
+            "Hardlink failed for readable audio file, copying instead: {}",
+            hard_link_error
+        );
+        std::fs::copy(original_audio_path, &readable_path).map(|_| ())
+    })?;
+
+    info!("Created readable audio file: {}", readable_path.display());
+    Ok(readable_path)
+}
+
+fn build_readable_audio_path(
+    meeting_folder: &Path,
+    original_audio_path: &Path,
+) -> PathBuf {
+    let folder_name = meeting_folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("meetily-recording");
+    let base_name = sanitize_filename(folder_name);
+
+    let extension = original_audio_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("mp4");
+
+    meeting_folder.join(format!("{}.{}", base_name, extension))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readable_audio_path_uses_meeting_folder_name() {
+        let folder = PathBuf::from("/tmp/Meeting 2026-07-04_17-24-14_2026-07-04_15-24");
+        let original = folder.join("audio.mp4");
+
+        let readable = build_readable_audio_path(&folder, &original);
+
+        assert_eq!(
+            readable,
+            folder.join("Meeting 2026-07-04_17-24-14_2026-07-04_15-24.mp4")
+        );
+    }
+
+    #[test]
+    fn readable_audio_path_has_default_when_folder_has_no_name() {
+        let folder = PathBuf::from("/");
+        let original = folder.join("audio.mp4");
+
+        let readable = build_readable_audio_path(&folder, &original);
+
+        assert_eq!(readable, folder.join("meetily-recording.mp4"));
     }
 }

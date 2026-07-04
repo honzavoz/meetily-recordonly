@@ -882,7 +882,7 @@ pub async fn stop_recording<R: Runtime>(
     );
 
     // Perform final cleanup with the manager if available
-    let (meeting_folder, meeting_name) = if let Some(mut manager) = manager_for_cleanup {
+    let (meeting_folder, meeting_name, saved_audio_path) = if let Some(mut manager) = manager_for_cleanup {
         info!("🧹 Performing final cleanup and saving recording data");
 
         // Extract meeting info BEFORE async operations
@@ -909,10 +909,12 @@ pub async fn stop_recording<R: Runtime>(
             }
         }
 
-        (meeting_folder, meeting_name)
+        let saved_audio_path = manager.get_saved_audio_path();
+
+        (meeting_folder, meeting_name, saved_audio_path)
     } else {
         info!("ℹ️ No recording manager available for cleanup");
-        (None, None)
+        (None, None, None)
     };
 
     // Set recording flag to false
@@ -930,10 +932,14 @@ pub async fn stop_recording<R: Runtime>(
         ),
         _ => (None, None),
     };
+    let saved_audio_path_str = saved_audio_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().to_string());
 
     info!("📤 Preparing recording metadata for frontend save");
     info!("   folder_path: {:?}", folder_path_str);
     info!("   meeting_name: {:?}", meeting_name_str);
+    info!("   audio_file: {:?}", saved_audio_path_str);
 
     // Database save removed - frontend will handle this after receiving all transcripts
     info!("ℹ️ Skipping database save in Rust - frontend will save after all transcripts received");
@@ -955,6 +961,7 @@ pub async fn stop_recording<R: Runtime>(
             "message": "Recording stopped - frontend will save after all transcripts received",
             "folder_path": folder_path_str,
             "meeting_name": meeting_name_str,
+            "audio_file": saved_audio_path_str,
             "live_transcription_enabled": live_transcription_enabled
         }),
     )
