@@ -47,6 +47,7 @@ interface ImportAudioDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   preselectedFile?: string | null;
+  preselectedTitle?: string | null;
   onComplete?: () => void;
 }
 
@@ -72,6 +73,7 @@ export function ImportAudioDialog({
   open,
   onOpenChange,
   preselectedFile,
+  preselectedTitle,
   onComplete,
 }: ImportAudioDialogProps) {
   const router = useRouter();
@@ -152,7 +154,7 @@ export function ImportAudioDialog({
       if (preselectedFile) {
         validateFile(preselectedFile).then((info) => {
           if (info) {
-            setTitle(info.filename);
+            setTitle(preselectedTitle || info.filename);
           }
         });
       }
@@ -160,7 +162,7 @@ export function ImportAudioDialog({
       // Fetch available models using centralized hook
       fetchModels();
     }
-  }, [open, preselectedFile, importPreferences.language, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
+  }, [open, preselectedFile, preselectedTitle, importPreferences.language, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
 
   // Update title when fileInfo changes
   useEffect(() => {

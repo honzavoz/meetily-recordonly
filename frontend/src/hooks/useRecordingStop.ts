@@ -18,6 +18,7 @@ import {
   getLiveTranscriptionEnabled,
   shouldPersistTranscriptMeeting,
 } from '@/lib/recording-mode';
+import { REFRESH_TRANSCRIBE_LATER_EVENT } from '@/hooks/useTranscribeLaterRecordings';
 
 type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
 
@@ -193,7 +194,7 @@ export function useRecordingStop(
         }
         setStatus(RecordingStatus.COMPLETED);
         toast.success('Audio recording saved', {
-          description: 'Live transcription was off. Opening Import Audio for this recording.',
+          description: 'Live transcription was off. It is ready in To Transcribe.',
           action: {
             label: 'Open Folder',
             onClick: () => {
@@ -204,11 +205,7 @@ export function useRecordingStop(
           },
           duration: 12000,
         });
-        if (audioPath) {
-          window.dispatchEvent(new CustomEvent('open-record-only-import', {
-            detail: { audioPath },
-          }));
-        }
+        window.dispatchEvent(new CustomEvent(REFRESH_TRANSCRIBE_LATER_EVENT));
         console.log('Record-only session completed', { folderPath, audioPath });
         sessionStorage.removeItem('last_recording_folder_path');
         sessionStorage.removeItem('last_recording_meeting_name');

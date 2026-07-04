@@ -1,0 +1,308 @@
+use super::constants::AUDIO_EXTENSIONS;
+use super::recording_preferences::load_recording_preferences;
+use log::{info, warn};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Manager, Runtime};
+
+const INDEX_FILE_NAME: &str = "transcribe_later_index.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TranscribeLaterStatus {
+    Pending,
+    Imported,
+    Hidden,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeLaterIndexEntry {
+    pub audio_path: String,
+    pub size_bytes: u64,
+    pub modified_at_ms: u64,
+    pub status: TranscribeLaterStatus,
+    pub updated_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscribeLaterRecording {
+    pub id: String,
+    pub title: String,
+    pub folder_path: String,
+    pub audio_path: String,
+    pub size_bytes: u64,
+    pub modified_at_ms: u64,
+    pub status: TranscribeLaterStatus,
+    pub index_entry: Option<TranscribeLaterIndexEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct TranscribeLaterIndex {
+    entries: HashMap<String, TranscribeLaterIndexEntry>,
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn modified_at_ms(metadata: &fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+fn is_supported_audio_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let normalized = ext.to_lowercase();
+            AUDIO_EXTENSIONS.contains(&normalized.as_str())
+        })
+        .unwrap_or(false)
+}
+
+fn title_from_folder(folder_path: &Path) -> String {
+    folder_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("Recording")
+        .to_string()
+}
+
+fn choose_audio_file(folder_path: &Path) -> Option<PathBuf> {
+    let folder_name = folder_path.file_name()?.to_string_lossy().to_string();
+    let mut supported_files = fs::read_dir(folder_path)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && is_supported_audio_file(path))
+        .collect::<Vec<_>>();
+
+    supported_files.sort();
+
+    if let Some(named_file) = supported_files.iter().find(|path| {
+        path.file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(|stem| stem == folder_name)
+            .unwrap_or(false)
+    }) {
+        return Some(named_file.clone());
+    }
+
+    if let Some(audio_mp4) = supported_files.iter().find(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.eq_ignore_ascii_case("audio.mp4"))
+            .unwrap_or(false)
+    }) {
+        return Some(audio_mp4.clone());
+    }
+
+    supported_files.into_iter().next()
+}
+
+fn has_completed_import_artifacts(folder_path: &Path) -> bool {
+    folder_path.join("transcripts.json").exists() || folder_path.join("metadata.json").exists()
+}
+
+fn is_unchanged(recording: &TranscribeLaterRecording, entry: &TranscribeLaterIndexEntry) -> bool {
+    recording.audio_path == entry.audio_path
+        && recording.size_bytes == entry.size_bytes
+        && recording.modified_at_ms == entry.modified_at_ms
+}
+
+fn index_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to resolve app data directory: {}", e))?;
+    fs::create_dir_all(&app_data_dir)
+        .map_err(|e| format!("Failed to create app data directory: {}", e))?;
+    Ok(app_data_dir.join(INDEX_FILE_NAME))
+}
+
+fn read_index<R: Runtime>(app: &AppHandle<R>) -> TranscribeLaterIndex {
+    let path = match index_path(app) {
+        Ok(path) => path,
+        Err(error) => {
+            warn!("Failed to resolve transcribe later index path: {}", error);
+            return TranscribeLaterIndex::default();
+        }
+    };
+
+    match fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|error| {
+            warn!("Failed to parse transcribe later index: {}", error);
+            TranscribeLaterIndex::default()
+        }),
+        Err(_) => TranscribeLaterIndex::default(),
+    }
+}
+
+fn write_index<R: Runtime>(app: &AppHandle<R>, index: &TranscribeLaterIndex) -> Result<(), String> {
+    let path = index_path(app)?;
+    let raw = serde_json::to_string_pretty(index)
+        .map_err(|e| format!("Failed to serialize transcribe later index: {}", e))?;
+    fs::write(&path, raw).map_err(|e| format!("Failed to write transcribe later index: {}", e))
+}
+
+fn scan_recordings_folder(
+    recordings_folder: &Path,
+    index: &TranscribeLaterIndex,
+) -> Vec<TranscribeLaterRecording> {
+    let mut recordings = fs::read_dir(recordings_folder)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(|entry| entry.ok()))
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .filter(|path| !has_completed_import_artifacts(path))
+        .filter_map(|folder_path| {
+            let audio_path = choose_audio_file(&folder_path)?;
+            let metadata = fs::metadata(&audio_path).ok()?;
+            let audio_path_string = audio_path.to_string_lossy().to_string();
+            let index_entry = index.entries.get(&audio_path_string).cloned();
+            let mut recording = TranscribeLaterRecording {
+                id: audio_path_string.clone(),
+                title: title_from_folder(&folder_path),
+                folder_path: folder_path.to_string_lossy().to_string(),
+                audio_path: audio_path_string,
+                size_bytes: metadata.len(),
+                modified_at_ms: modified_at_ms(&metadata),
+                status: TranscribeLaterStatus::Pending,
+                index_entry,
+            };
+
+            if let Some(entry) = &recording.index_entry {
+                recording.status = if is_unchanged(&recording, entry) {
+                    entry.status.clone()
+                } else {
+                    TranscribeLaterStatus::Pending
+                };
+            }
+
+            Some(recording)
+        })
+        .filter(|recording| recording.status == TranscribeLaterStatus::Pending)
+        .collect::<Vec<_>>();
+
+    recordings.sort_by(|a, b| b.modified_at_ms.cmp(&a.modified_at_ms));
+    recordings
+}
+
+fn mark_recording_status<R: Runtime>(
+    app: &AppHandle<R>,
+    audio_path: String,
+    size_bytes: u64,
+    modified_at_ms: u64,
+    status: TranscribeLaterStatus,
+) -> Result<(), String> {
+    let mut index = read_index(app);
+    index.entries.insert(
+        audio_path.clone(),
+        TranscribeLaterIndexEntry {
+            audio_path,
+            size_bytes,
+            modified_at_ms,
+            status,
+            updated_at_ms: now_ms(),
+        },
+    );
+    write_index(app, &index)
+}
+
+#[tauri::command]
+pub async fn list_pending_recordings_to_transcribe<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<Vec<TranscribeLaterRecording>, String> {
+    let preferences = load_recording_preferences(&app)
+        .await
+        .map_err(|e| format!("Failed to load recording preferences: {}", e))?;
+
+    if !preferences.save_folder.exists() {
+        return Ok(Vec::new());
+    }
+
+    let index = read_index(&app);
+    let recordings = scan_recordings_folder(&preferences.save_folder, &index);
+    info!("Found {} recordings pending transcription", recordings.len());
+    Ok(recordings)
+}
+
+#[tauri::command]
+pub async fn mark_recording_transcribed<R: Runtime>(
+    app: AppHandle<R>,
+    audio_path: String,
+    size_bytes: u64,
+    modified_at_ms: u64,
+) -> Result<(), String> {
+    mark_recording_status(
+        &app,
+        audio_path,
+        size_bytes,
+        modified_at_ms,
+        TranscribeLaterStatus::Imported,
+    )
+}
+
+#[tauri::command]
+pub async fn hide_recording_from_transcribe_later<R: Runtime>(
+    app: AppHandle<R>,
+    audio_path: String,
+    size_bytes: u64,
+    modified_at_ms: u64,
+) -> Result<(), String> {
+    mark_recording_status(
+        &app,
+        audio_path,
+        size_bytes,
+        modified_at_ms,
+        TranscribeLaterStatus::Hidden,
+    )
+}
+
+#[tauri::command]
+pub async fn open_transcribe_later_recording_folder(folder_path: String) -> Result<(), String> {
+    let folder = PathBuf::from(&folder_path);
+    if !folder.exists() || !folder.is_dir() {
+        return Err("Recording folder no longer exists".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&folder_path)
+            .spawn()
+            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    }
+
+    Ok(())
+}

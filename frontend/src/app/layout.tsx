@@ -25,6 +25,14 @@ import { RecordingPostProcessingProvider } from '@/contexts/RecordingPostProcess
 import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
+import type { TranscribeLaterRecording } from '@/lib/transcribe-later'
+import { getTranscribeLaterTitle } from '@/lib/transcribe-later'
+import { transcribeLaterService } from '@/services/transcribeLaterService'
+import {
+  OPEN_TRANSCRIBE_LATER_IMPORT_EVENT,
+  REFRESH_TRANSCRIBE_LATER_EVENT,
+  type OpenTranscribeLaterImportDetail,
+} from '@/hooks/useTranscribeLaterRecordings'
 
 
 const sourceSans3 = Source_Sans_3({
@@ -40,10 +48,14 @@ function ConditionalImportDialog({
   showImportDialog,
   handleImportDialogClose,
   importFilePath,
+  importTitle,
+  onComplete,
 }: {
   showImportDialog: boolean;
   handleImportDialogClose: (open: boolean) => void;
   importFilePath: string | null;
+  importTitle?: string | null;
+  onComplete?: () => void;
 }) {
   const { betaFeatures } = useConfig();
 
@@ -57,6 +69,8 @@ function ConditionalImportDialog({
       open={showImportDialog}
       onOpenChange={handleImportDialogClose}
       preselectedFile={importFilePath}
+      preselectedTitle={importTitle}
+      onComplete={onComplete}
     />
   );
 }
@@ -75,6 +89,8 @@ export default function RootLayout({
   const [showDropOverlay, setShowDropOverlay] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [importFilePath, setImportFilePath] = useState<string | null>(null)
+  const [importTitle, setImportTitle] = useState<string | null>(null)
+  const [transcribeLaterImport, setTranscribeLaterImport] = useState<TranscribeLaterRecording | null>(null)
 
   useEffect(() => {
     // Check onboarding status first
@@ -213,14 +229,36 @@ export default function RootLayout({
     setShowImportDialog(open);
     if (!open) {
       setImportFilePath(null);
+      setImportTitle(null);
+      setTranscribeLaterImport(null);
     }
   }, []);
 
   // Handler for ImportDialogProvider - opens import dialog from any child component
   const handleOpenImportDialog = useCallback((filePath?: string | null) => {
     setImportFilePath(filePath ?? null);
+    setImportTitle(null);
+    setTranscribeLaterImport(null);
     setShowImportDialog(true);
   }, []);
+
+  const handleImportComplete = useCallback(async () => {
+    if (!transcribeLaterImport) {
+      return;
+    }
+
+    try {
+      await transcribeLaterService.markTranscribed(transcribeLaterImport);
+      window.dispatchEvent(new CustomEvent(REFRESH_TRANSCRIBE_LATER_EVENT));
+    } catch (error) {
+      console.error('[Layout] Failed to mark recording as transcribed:', error);
+      toast.warning('Recording imported, but it may still appear in To Transcribe', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setTranscribeLaterImport(null);
+    }
+  }, [transcribeLaterImport]);
 
   useEffect(() => {
     const handleRecordOnlyImport = (event: Event) => {
@@ -246,6 +284,35 @@ export default function RootLayout({
       window.removeEventListener('open-record-only-import', handleRecordOnlyImport);
     };
   }, [handleOpenImportDialog]);
+
+  useEffect(() => {
+    const handleTranscribeLaterImport = (event: Event) => {
+      const recording = (event as CustomEvent<OpenTranscribeLaterImportDetail>).detail?.recording;
+      if (!recording?.audioPath) {
+        toast.error('Could not open To Transcribe item', {
+          description: 'The recording path was missing.',
+        });
+        return;
+      }
+
+      if (!loadBetaFeatures().importAndRetranscribe) {
+        toast.error('Import Audio is disabled', {
+          description: 'Enable "Import Audio & Retranscribe" in Settings > Beta to transcribe this recording.',
+        });
+        return;
+      }
+
+      setTranscribeLaterImport(recording);
+      setImportFilePath(recording.audioPath);
+      setImportTitle(getTranscribeLaterTitle(recording));
+      setShowImportDialog(true);
+    };
+
+    window.addEventListener(OPEN_TRANSCRIBE_LATER_IMPORT_EVENT, handleTranscribeLaterImport);
+    return () => {
+      window.removeEventListener(OPEN_TRANSCRIBE_LATER_IMPORT_EVENT, handleTranscribeLaterImport);
+    };
+  }, []);
 
   const handleOnboardingComplete = () => {
     console.log('[Layout] Onboarding completed, reloading app')
@@ -287,6 +354,8 @@ export default function RootLayout({
                                 showImportDialog={showImportDialog}
                                 handleImportDialogClose={handleImportDialogClose}
                                 importFilePath={importFilePath}
+                                importTitle={importTitle}
+                                onComplete={handleImportComplete}
                               />
                             </ImportDialogProvider>
                           </RecordingPostProcessingProvider>

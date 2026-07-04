@@ -690,6 +690,10 @@ pub fn run() {
             audio::recording_preferences::get_current_audio_backend,
             audio::recording_preferences::set_audio_backend,
             audio::recording_preferences::get_audio_backend_info,
+            audio::transcribe_later::list_pending_recordings_to_transcribe,
+            audio::transcribe_later::mark_recording_transcribed,
+            audio::transcribe_later::hide_recording_from_transcribe_later,
+            audio::transcribe_later::open_transcribe_later_recording_folder,
             // Language preference commands
             set_language_preference,
             // Notification system commands

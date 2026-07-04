@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FileAudio, FolderOpen, EyeOff, Play } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
+import { useTranscribeLaterRecordings } from '@/hooks/useTranscribeLaterRecordings';
+import { getTranscribeLaterTitle } from '@/lib/transcribe-later';
 
 import {
   Dialog,
@@ -61,6 +63,7 @@ const Sidebar: React.FC = () => {
   const { isRecording } = useRecordingState();
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
+  const transcribeLater = useTranscribeLaterRecordings();
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
@@ -506,6 +509,27 @@ const Sidebar: React.FC = () => {
             </Tooltip>
           )}
 
+          {betaFeatures.importAndRetranscribe && transcribeLater.recordings.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => {
+                    if (isCollapsed) toggleCollapse();
+                  }}
+                  className="relative p-2 rounded-lg transition-colors duration-150 hover:bg-amber-100 bg-amber-50"
+                >
+                  <FileAudio className="w-5 h-5 text-amber-700" />
+                  <span className="absolute -right-1 -top-1 min-w-4 h-4 px-1 rounded-full bg-amber-600 text-[10px] leading-4 text-white text-center">
+                    {transcribeLater.recordings.length}
+                  </span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                <p>To Transcribe</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -660,6 +684,74 @@ const Sidebar: React.FC = () => {
     );
   };
 
+  const renderTranscribeLaterSection = () => {
+    if (!betaFeatures.importAndRetranscribe || transcribeLater.recordings.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className="flex-shrink-0 mx-3 mt-3">
+        <div className="flex items-center px-3 h-10 text-lg font-semibold rounded-lg text-gray-700">
+          <FileAudio className="w-4 h-4 mr-2 text-amber-700" />
+          <span>To Transcribe</span>
+          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+            {transcribeLater.recordings.length}
+          </span>
+        </div>
+
+        <div className="space-y-1">
+          {transcribeLater.recordings.map((recording) => (
+            <div
+              key={recording.id}
+              className="group rounded-md px-3 py-2 text-sm hover:bg-amber-50"
+            >
+              <div className="flex items-start gap-2">
+                <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+                  <FileAudio className="h-3.5 w-3.5 text-amber-700" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <button
+                    className="block w-full truncate text-left font-medium text-gray-800"
+                    onClick={() => transcribeLater.transcribe(recording)}
+                    title={recording.title}
+                  >
+                    {getTranscribeLaterTitle(recording)}
+                  </button>
+                  <div className="mt-1 flex items-center gap-1">
+                    <button
+                      className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
+                      onClick={() => transcribeLater.transcribe(recording)}
+                      title="Transcribe"
+                      aria-label="Transcribe recording"
+                    >
+                      <Play className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
+                      onClick={() => transcribeLater.openFolder(recording)}
+                      title="Open Folder"
+                      aria-label="Open recording folder"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
+                      onClick={() => transcribeLater.hide(recording)}
+                      title="Hide"
+                      aria-label="Hide recording from To Transcribe"
+                    >
+                      <EyeOff className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="fixed top-0 left-0 h-screen z-40">
       {/* Floating collapse button */}
@@ -736,6 +828,7 @@ const Sidebar: React.FC = () => {
           {/* Content area */}
           <div className="flex-1 flex flex-col min-h-0">
             {renderCollapsedIcons()}
+            {!isCollapsed && renderTranscribeLaterSection()}
             {/* Meeting Notes folder header - fixed */}
             {!isCollapsed && (
               <div className="flex-shrink-0">
