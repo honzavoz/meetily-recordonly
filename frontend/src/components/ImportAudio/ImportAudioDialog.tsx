@@ -37,6 +37,10 @@ import { useRouter } from 'next/navigation';
 import { useSidebar } from '../Sidebar/SidebarProvider';
 import { LANGUAGES } from '@/constants/languages';
 import { useTranscriptionModels, ModelOption } from '@/hooks/useTranscriptionModels';
+import {
+  readImportAudioPreferences,
+  saveImportAudioPreferences,
+} from '@/lib/import-audio-preferences';
 
 
 interface ImportAudioDialogProps {
@@ -73,9 +77,13 @@ export function ImportAudioDialog({
   const router = useRouter();
   const { refetchMeetings } = useSidebar();
   const { selectedLanguage, transcriptModelConfig } = useConfig();
+  const importPreferences = useMemo(
+    () => readImportAudioPreferences(selectedLanguage || 'auto'),
+    [open, selectedLanguage],
+  );
 
   const [title, setTitle] = useState('');
-  const [selectedLang, setSelectedLang] = useState(selectedLanguage || 'auto');
+  const [selectedLang, setSelectedLang] = useState(importPreferences.language);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [titleModifiedByUser, setTitleModifiedByUser] = useState(false);
 
@@ -92,7 +100,7 @@ export function ImportAudioDialog({
     loadingModels,
     fetchModels,
     resetSelection,
-  } = useTranscriptionModels(transcriptModelConfig);
+  } = useTranscriptionModels(transcriptModelConfig, importPreferences.modelKey);
 
   const handleImportComplete = useCallback((result: ImportResult) => {
     toast.success(`Import complete! ${result.segments_count} segments created.`);
@@ -137,7 +145,7 @@ export function ImportAudioDialog({
       resetSelection();
       setTitle('');
       setTitleModifiedByUser(false);
-      setSelectedLang(selectedLanguage || 'auto');
+      setSelectedLang(importPreferences.language);
       setShowAdvanced(false);
 
       // Validate preselected file if provided
@@ -152,7 +160,7 @@ export function ImportAudioDialog({
       // Fetch available models using centralized hook
       fetchModels();
     }
-  }, [open, preselectedFile, selectedLanguage, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
+  }, [open, preselectedFile, importPreferences.language, transcriptModelConfig, reset, resetSelection, validateFile, fetchModels]);
 
   // Update title when fileInfo changes
   useEffect(() => {
@@ -186,6 +194,12 @@ export function ImportAudioDialog({
 
   const handleStartImport = async () => {
     if (!fileInfo) return;
+
+    const languagePreference = isParakeetModel ? 'auto' : selectedLang;
+    saveImportAudioPreferences({
+      language: languagePreference,
+      modelKey: selectedModel ? `${selectedModel.provider}:${selectedModel.name}` : selectedModelKey || null,
+    });
 
     await startImport(
       fileInfo.path,

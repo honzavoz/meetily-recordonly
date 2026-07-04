@@ -28,7 +28,10 @@ interface TranscriptModelConfig {
  * @param transcriptModelConfig - User's saved model configuration from context
  * @returns Object containing available models, selected model key, loading state, and fetch function
  */
-export function useTranscriptionModels(transcriptModelConfig: TranscriptModelConfig | undefined) {
+export function useTranscriptionModels(
+  transcriptModelConfig: TranscriptModelConfig | undefined,
+  preferredModelKey?: string | null,
+) {
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [selectedModelKey, setSelectedModelKey] = useState<string>('');
   const [loadingModels, setLoadingModels] = useState(false);
@@ -90,10 +93,15 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
         (configuredProvider === 'localWhisper' && m.provider === 'whisper' && m.name === configuredModel) ||
         (configuredProvider === 'parakeet' && m.provider === 'parakeet' && m.name === configuredModel)
     );
+    const preferredMatch = preferredModelKey
+      ? allModels.find((m) => `${m.provider}:${m.name}` === preferredModelKey)
+      : undefined;
 
     // Only set default model if user hasn't manually selected one
     if (!userSelectedRef.current) {
-      if (configuredMatch) {
+      if (preferredMatch) {
+        setSelectedModelKey(`${preferredMatch.provider}:${preferredMatch.name}`);
+      } else if (configuredMatch) {
         // Use the configured model if available
         setSelectedModelKey(`${configuredMatch.provider}:${configuredMatch.name}`);
       } else if (allModels.length > 0) {
@@ -103,7 +111,7 @@ export function useTranscriptionModels(transcriptModelConfig: TranscriptModelCon
     }
 
     setLoadingModels(false);
-  }, [transcriptModelConfig]);
+  }, [transcriptModelConfig, preferredModelKey]);
 
   // Reset user selection tracking (call when dialog opens fresh)
   const resetSelection = useCallback(() => {
