@@ -176,9 +176,10 @@ export function useRecordingStop(
 
       if (!liveTranscriptionEnabled) {
         const folderPath = sessionStorage.getItem('last_recording_folder_path');
+        const audioPath = folderPath ? `${folderPath}/audio.mp4` : null;
         setStatus(RecordingStatus.COMPLETED);
         toast.success('Audio recording saved', {
-          description: 'Live transcription was off. Use Import Audio to transcribe this recording when you are ready.',
+          description: 'Live transcription was off. Opening Import Audio for this recording.',
           action: {
             label: 'Open Folder',
             onClick: () => {
@@ -189,7 +190,12 @@ export function useRecordingStop(
           },
           duration: 12000,
         });
-        console.log('Record-only session completed', { folderPath });
+        if (audioPath) {
+          window.dispatchEvent(new CustomEvent('open-record-only-import', {
+            detail: { audioPath },
+          }));
+        }
+        console.log('Record-only session completed', { folderPath, audioPath });
         sessionStorage.removeItem('last_recording_folder_path');
         sessionStorage.removeItem('last_recording_meeting_name');
         sessionStorage.removeItem('last_recording_live_transcription_enabled');

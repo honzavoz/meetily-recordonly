@@ -222,6 +222,31 @@ export default function RootLayout({
     setShowImportDialog(true);
   }, []);
 
+  useEffect(() => {
+    const handleRecordOnlyImport = (event: Event) => {
+      const audioPath = (event as CustomEvent<{ audioPath?: string | null }>).detail?.audioPath;
+      if (!audioPath) {
+        toast.error('Audio recording saved, but no file path was provided');
+        return;
+      }
+
+      if (!loadBetaFeatures().importAndRetranscribe) {
+        toast.error('Import Audio is disabled', {
+          description: 'Enable "Import Audio & Retranscribe" in Settings > Beta, then import the saved audio file.',
+        });
+        return;
+      }
+
+      console.log('[Layout] Opening Import Audio for record-only file:', audioPath);
+      handleOpenImportDialog(audioPath);
+    };
+
+    window.addEventListener('open-record-only-import', handleRecordOnlyImport);
+    return () => {
+      window.removeEventListener('open-record-only-import', handleRecordOnlyImport);
+    };
+  }, [handleOpenImportDialog]);
+
   const handleOnboardingComplete = () => {
     console.log('[Layout] Onboarding completed, reloading app')
     setShowOnboarding(false)
