@@ -15,6 +15,7 @@ export interface TranscribeLaterRecording {
   audioPath: string;
   sizeBytes: number;
   modifiedAtMs: number;
+  durationSeconds?: number | null;
   status: TranscribeLaterStatus;
   indexEntry?: TranscribeLaterIndexEntry | null;
 }
@@ -49,4 +50,53 @@ export function getTranscribeLaterTitle(recording: Pick<TranscribeLaterRecording
 
   const [, year, month, day, hour, minute] = match;
   return `Meeting ${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+export function formatTranscribeLaterDuration(seconds?: number | null): string | null {
+  if (!seconds || !Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  const totalSeconds = Math.round(seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const remainingSeconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+export function formatTranscribeLaterSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  if (unitIndex === 0) {
+    return `${Math.round(value)} ${units[unitIndex]}`;
+  }
+
+  return `${value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+export function getTranscribeLaterSubtitle(
+  recording: Pick<TranscribeLaterRecording, 'durationSeconds' | 'sizeBytes'>,
+): string {
+  const parts = [
+    formatTranscribeLaterDuration(recording.durationSeconds),
+    formatTranscribeLaterSize(recording.sizeBytes),
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(' • ');
 }

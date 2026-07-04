@@ -189,9 +189,9 @@ pub fn validate_audio_file(path: &Path) -> Result<AudioFileInfo> {
     })
 }
 
-/// Extract duration from audio file metadata without full decode
-/// Returns error if metadata is unavailable, triggering fallback to full decode
-fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
+/// Extract duration from audio file metadata without full decode.
+/// Callers can decide whether metadata failures should fall back to decoding.
+pub(crate) fn extract_duration_from_metadata(path: &Path) -> Result<f64> {
     use symphonia::core::formats::FormatOptions;
     use symphonia::core::io::MediaSourceStream;
     use symphonia::core::meta::MetadataOptions;

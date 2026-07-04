@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
+  formatTranscribeLaterDuration,
+  getTranscribeLaterSubtitle,
   getTranscribeLaterTitle,
   isPendingTranscribeLaterRecording,
   type TranscribeLaterIndexEntry,
@@ -15,6 +17,7 @@ const recording = (
   audioPath: "/recordings/Meeting 2026-07-04_17-55-31/Meeting 2026-07-04_17-55-31.mp4",
   sizeBytes: 1200,
   modifiedAtMs: 1_788_017_731_000,
+  durationSeconds: null,
   status: "pending",
   ...overrides,
 });
@@ -22,6 +25,17 @@ const recording = (
 describe("transcribe later helpers", () => {
   test("formats meeting folder names into readable titles", () => {
     expect(getTranscribeLaterTitle(recording())).toBe("Meeting 2026-07-04 17:55");
+  });
+
+  test("formats recording duration for the sidebar", () => {
+    expect(formatTranscribeLaterDuration(65)).toBe("1:05");
+    expect(formatTranscribeLaterDuration(3661)).toBe("1:01:01");
+    expect(formatTranscribeLaterDuration(null)).toBeNull();
+  });
+
+  test("shows duration and file size in the sidebar subtitle", () => {
+    expect(getTranscribeLaterSubtitle(recording({ durationSeconds: 754, sizeBytes: 4_407_706 }))).toBe("12:34 • 4.2 MB");
+    expect(getTranscribeLaterSubtitle(recording({ durationSeconds: null, sizeBytes: 154_112 }))).toBe("150.5 KB");
   });
 
   test("keeps pending recordings visible", () => {

@@ -1,4 +1,5 @@
 use super::constants::AUDIO_EXTENSIONS;
+use super::import::extract_duration_from_metadata;
 use super::recording_preferences::load_recording_preferences;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,7 @@ pub struct TranscribeLaterRecording {
     pub audio_path: String,
     pub size_bytes: u64,
     pub modified_at_ms: u64,
+    pub duration_seconds: Option<f64>,
     pub status: TranscribeLaterStatus,
     pub index_entry: Option<TranscribeLaterIndexEntry>,
 }
@@ -155,6 +157,23 @@ fn has_completed_import_artifacts(folder_path: &Path) -> bool {
     transcript_file_has_segments(folder_path) || metadata_has_imported_meeting_id(folder_path)
 }
 
+fn read_recording_duration_seconds(folder_path: &Path) -> Option<f64> {
+    let metadata_path = folder_path.join("metadata.json");
+    let raw = fs::read_to_string(metadata_path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+
+    value
+        .get("duration_seconds")
+        .and_then(|duration| duration.as_f64())
+        .filter(|duration| duration.is_finite() && *duration > 0.0)
+}
+
+fn read_audio_duration_seconds(audio_path: &Path) -> Option<f64> {
+    extract_duration_from_metadata(audio_path)
+        .ok()
+        .filter(|duration| duration.is_finite() && *duration > 0.0)
+}
+
 fn is_unchanged(recording: &TranscribeLaterRecording, entry: &TranscribeLaterIndexEntry) -> bool {
     recording.audio_path == entry.audio_path
         && recording.size_bytes == entry.size_bytes
@@ -219,6 +238,8 @@ fn scan_recordings_folder(
                 audio_path: audio_path_string,
                 size_bytes: metadata.len(),
                 modified_at_ms: modified_at_ms(&metadata),
+                duration_seconds: read_recording_duration_seconds(&folder_path)
+                    .or_else(|| read_audio_duration_seconds(&audio_path)),
                 status: TranscribeLaterStatus::Pending,
                 index_entry,
             };

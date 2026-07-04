@@ -17,7 +17,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranscribeLaterRecordings } from '@/hooks/useTranscribeLaterRecordings';
-import { getTranscribeLaterTitle } from '@/lib/transcribe-later';
+import { getTranscribeLaterSubtitle, getTranscribeLaterTitle } from '@/lib/transcribe-later';
 
 import {
   Dialog,
@@ -690,7 +690,7 @@ const Sidebar: React.FC = () => {
     }
 
     return (
-      <div className="flex-shrink-0 mx-3 mt-3">
+      <div className="mx-3 mt-3 pb-2">
         <div className="flex items-center px-3 h-10 text-lg font-semibold rounded-lg text-gray-700">
           <FileAudio className="w-4 h-4 mr-2 text-amber-700" />
           <span>To Transcribe</span>
@@ -717,6 +717,9 @@ const Sidebar: React.FC = () => {
                   >
                     {getTranscribeLaterTitle(recording)}
                   </button>
+                  <div className="mt-0.5 truncate text-xs text-gray-500">
+                    {getTranscribeLaterSubtitle(recording)}
+                  </div>
                   <div className="mt-1 flex items-center gap-1">
                     <button
                       className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
@@ -828,15 +831,13 @@ const Sidebar: React.FC = () => {
           {/* Content area */}
           <div className="flex-1 flex flex-col min-h-0">
             {renderCollapsedIcons()}
-            {!isCollapsed && renderTranscribeLaterSection()}
-            {/* Meeting Notes folder header - fixed */}
             {!isCollapsed && (
-              <div className="flex-shrink-0">
+              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0 pb-2">
+                {renderTranscribeLaterSection()}
+
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
-                    <div
-                      className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg"
-                    >
+                    <div className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg">
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
                       <span className="text-gray-700">{item.title}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
@@ -845,12 +846,7 @@ const Sidebar: React.FC = () => {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
 
-            {/* Scrollable meeting items */}
-            {!isCollapsed && (
-              <div className="flex-1 overflow-y-auto custom-scrollbar min-h-0">
                 {filteredSidebarItems
                   .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
                   .map(item => (
