@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FileAudio, FolderOpen, EyeOff, Play } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FileAudio, FolderOpen, Play } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -26,6 +26,7 @@ import {
   type SidebarSectionState,
 } from '@/lib/sidebar-accordion';
 import { getTranscribeLaterSubtitle, getTranscribeLaterTitle } from '@/lib/transcribe-later';
+import type { TranscribeLaterRecording } from '@/lib/transcribe-later';
 
 import {
   Dialog,
@@ -130,6 +131,10 @@ const Sidebar: React.FC = () => {
 
 
   const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
+  const [transcribeDeleteModalState, setTranscribeDeleteModalState] = useState<{
+    isOpen: boolean;
+    recording: TranscribeLaterRecording | null;
+  }>({ isOpen: false, recording: null });
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -416,6 +421,13 @@ const Sidebar: React.FC = () => {
       handleDelete(deleteModalState.itemId);
     }
     setDeleteModalState({ isOpen: false, itemId: null });
+  };
+
+  const handleTranscribeDeleteConfirm = () => {
+    if (transcribeDeleteModalState.recording) {
+      transcribeLater.deleteRecording(transcribeDeleteModalState.recording);
+    }
+    setTranscribeDeleteModalState({ isOpen: false, recording: null });
   };
 
   // Handle modal editing of meeting names
@@ -789,12 +801,20 @@ const Sidebar: React.FC = () => {
                     </div>
                     <div className="mt-1 flex items-center gap-1">
                       <button
+                        className="rounded-md p-1 text-green-700 hover:bg-green-100"
+                        onClick={() => transcribeLater.play(recording)}
+                        title="Play"
+                        aria-label="Play recording"
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                      </button>
+                      <button
                         className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
                         onClick={() => transcribeLater.transcribe(recording)}
                         title="Transcribe"
                         aria-label="Transcribe recording"
                       >
-                        <Play className="h-3.5 w-3.5" />
+                        <Upload className="h-3.5 w-3.5" />
                       </button>
                       <button
                         className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
@@ -805,12 +825,12 @@ const Sidebar: React.FC = () => {
                         <FolderOpen className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
-                        onClick={() => transcribeLater.hide(recording)}
-                        title="Hide"
-                        aria-label="Hide recording from To Transcribe"
+                        className="rounded-md p-1 text-red-600 hover:bg-red-50"
+                        onClick={() => setTranscribeDeleteModalState({ isOpen: true, recording })}
+                        title="Delete"
+                        aria-label="Delete recording"
                       >
-                        <EyeOff className="h-3.5 w-3.5" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
@@ -992,6 +1012,13 @@ const Sidebar: React.FC = () => {
         text="Are you sure you want to delete this meeting? This action cannot be undone."
         onConfirm={handleDeleteConfirm}
         onCancel={() => setDeleteModalState({ isOpen: false, itemId: null })}
+      />
+
+      <ConfirmationModal
+        isOpen={transcribeDeleteModalState.isOpen}
+        text="Delete this recording folder? This will remove the audio, metadata, and any saved files for this record-only meeting."
+        onConfirm={handleTranscribeDeleteConfirm}
+        onCancel={() => setTranscribeDeleteModalState({ isOpen: false, recording: null })}
       />
 
       {/* Edit Meeting Title Modal */}

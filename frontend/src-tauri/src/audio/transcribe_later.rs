@@ -282,6 +282,59 @@ fn mark_recording_status<R: Runtime>(
     write_index(app, &index)
 }
 
+fn ensure_audio_inside_folder(folder_path: &str, audio_path: &str) -> Result<PathBuf, String> {
+    let folder = PathBuf::from(folder_path);
+    if !folder.exists() || !folder.is_dir() {
+        return Err("Recording folder no longer exists".to_string());
+    }
+
+    let audio = PathBuf::from(audio_path);
+    if !audio.exists() || !audio.is_file() {
+        return Err("Recording audio no longer exists".to_string());
+    }
+
+    let canonical_folder = folder
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve recording folder: {}", e))?;
+    let canonical_audio = audio
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve recording audio: {}", e))?;
+
+    if !canonical_audio.starts_with(&canonical_folder) {
+        return Err("Recording audio is not inside the recording folder".to_string());
+    }
+
+    Ok(canonical_folder)
+}
+
+fn open_path_with_system(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", path])
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_pending_recordings_to_transcribe<R: Runtime>(
     app: AppHandle<R>,
@@ -339,29 +392,25 @@ pub async fn open_transcribe_later_recording_folder(folder_path: String) -> Resu
         return Err("Recording folder no longer exists".to_string());
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&folder_path)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
+    open_path_with_system(&folder_path)
+}
+
+#[tauri::command]
+pub async fn play_transcribe_later_recording(audio_path: String) -> Result<(), String> {
+    let audio = PathBuf::from(&audio_path);
+    if !audio.exists() || !audio.is_file() {
+        return Err("Recording audio no longer exists".to_string());
     }
 
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&folder_path)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
+    open_path_with_system(&audio_path)
+}
 
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&folder_path)
-            .spawn()
-            .map_err(|e| format!("Failed to open folder: {}", e))?;
-    }
-
-    Ok(())
+#[tauri::command]
+pub async fn delete_transcribe_later_recording(
+    folder_path: String,
+    audio_path: String,
+) -> Result<(), String> {
+    let folder = ensure_audio_inside_folder(&folder_path, &audio_path)?;
+    fs::remove_dir_all(&folder)
+        .map_err(|e| format!("Failed to delete recording folder: {}", e))
 }

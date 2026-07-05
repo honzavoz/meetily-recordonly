@@ -22,6 +22,19 @@ export class TranscribeLaterService {
     });
   }
 
+  async play(recording: TranscribeLaterRecording): Promise<void> {
+    await invoke('play_transcribe_later_recording', {
+      audioPath: recording.audioPath,
+    });
+  }
+
+  async delete(recording: TranscribeLaterRecording): Promise<void> {
+    await invoke('delete_transcribe_later_recording', {
+      folderPath: recording.folderPath,
+      audioPath: recording.audioPath,
+    });
+  }
+
   async openFolder(recording: TranscribeLaterRecording): Promise<void> {
     await invoke('open_transcribe_later_recording_folder', {
       folderPath: recording.folderPath,

@@ -694,6 +694,8 @@ pub fn run() {
             audio::transcribe_later::mark_recording_transcribed,
             audio::transcribe_later::hide_recording_from_transcribe_later,
             audio::transcribe_later::open_transcribe_later_recording_folder,
+            audio::transcribe_later::play_transcribe_later_recording,
+            audio::transcribe_later::delete_transcribe_later_recording,
             // Language preference commands
             set_language_preference,
             // Notification system commands

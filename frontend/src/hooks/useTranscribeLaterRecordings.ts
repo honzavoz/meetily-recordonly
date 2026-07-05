@@ -61,6 +61,32 @@ export function useTranscribeLaterRecordings() {
     }
   }, [refresh]);
 
+  const play = useCallback(async (recording: TranscribeLaterRecording) => {
+    try {
+      await transcribeLaterService.play(recording);
+    } catch (error) {
+      console.error('Failed to play recording:', error);
+      toast.error('Could not play recording', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      await refresh();
+    }
+  }, [refresh]);
+
+  const deleteRecording = useCallback(async (recording: TranscribeLaterRecording) => {
+    try {
+      await transcribeLaterService.delete(recording);
+      toast.success('Recording deleted');
+      await refresh();
+    } catch (error) {
+      console.error('Failed to delete recording:', error);
+      toast.error('Could not delete recording', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      await refresh();
+    }
+  }, [refresh]);
+
   const openFolder = useCallback(async (recording: TranscribeLaterRecording) => {
     try {
       await transcribeLaterService.openFolder(recording);
@@ -79,6 +105,8 @@ export function useTranscribeLaterRecordings() {
     refresh,
     transcribe,
     hide,
+    play,
+    deleteRecording,
     openFolder,
   };
 }
