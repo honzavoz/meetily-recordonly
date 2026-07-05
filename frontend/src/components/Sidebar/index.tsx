@@ -17,6 +17,13 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranscribeLaterRecordings } from '@/hooks/useTranscribeLaterRecordings';
+import {
+  getAvailableSidebarAccordionSection,
+  getDefaultSidebarAccordionSection,
+  isSidebarAccordionSection,
+  SIDEBAR_ACCORDION_STORAGE_KEY,
+  type SidebarAccordionSection,
+} from '@/lib/sidebar-accordion';
 import { getTranscribeLaterSubtitle, getTranscribeLaterTitle } from '@/lib/transcribe-later';
 
 import {
@@ -64,7 +71,18 @@ const Sidebar: React.FC = () => {
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
   const transcribeLater = useTranscribeLaterRecordings();
+  const hasTranscribeLaterRecordings = betaFeatures.importAndRetranscribe && transcribeLater.recordings.length > 0;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
+  const [openSidebarSection, setOpenSidebarSection] = useState<SidebarAccordionSection>(() => {
+    if (typeof window === 'undefined') {
+      return 'meetings';
+    }
+
+    return getDefaultSidebarAccordionSection({
+      hasPendingRecordings: false,
+      storedSection: window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY),
+    });
+  });
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
@@ -107,6 +125,33 @@ const Sidebar: React.FC = () => {
 
 
   const [deleteModalState, setDeleteModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const storedSection = window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY);
+    const nextSection = getDefaultSidebarAccordionSection({
+      hasPendingRecordings: hasTranscribeLaterRecordings,
+      storedSection,
+    });
+
+    setOpenSidebarSection(nextSection);
+  }, [hasTranscribeLaterRecordings]);
+
+  const openSidebarAccordionSection = useCallback((section: SidebarAccordionSection) => {
+    const nextSection = getAvailableSidebarAccordionSection({
+      requestedSection: section,
+      hasPendingRecordings: hasTranscribeLaterRecordings,
+    });
+
+    setOpenSidebarSection(nextSection);
+
+    if (typeof window !== 'undefined' && isSidebarAccordionSection(nextSection)) {
+      window.localStorage.setItem(SIDEBAR_ACCORDION_STORAGE_KEY, nextSection);
+    }
+  }, [hasTranscribeLaterRecordings]);
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
@@ -685,72 +730,86 @@ const Sidebar: React.FC = () => {
   };
 
   const renderTranscribeLaterSection = () => {
-    if (!betaFeatures.importAndRetranscribe || transcribeLater.recordings.length === 0) {
+    if (!hasTranscribeLaterRecordings) {
       return null;
     }
 
+    const isOpen = openSidebarSection === 'transcribeLater';
+
     return (
       <div className="mx-3 mt-3 pb-2">
-        <div className="flex items-center px-3 h-10 text-lg font-semibold rounded-lg text-gray-700">
+        <button
+          type="button"
+          className="flex h-10 w-full items-center rounded-lg px-3 text-left text-lg font-semibold text-gray-700 hover:bg-gray-50"
+          onClick={() => openSidebarAccordionSection('transcribeLater')}
+          aria-expanded={isOpen}
+        >
           <FileAudio className="w-4 h-4 mr-2 text-amber-700" />
-          <span>To Transcribe</span>
+          <span className="flex-1">To Transcribe</span>
           <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
             {transcribeLater.recordings.length}
           </span>
-        </div>
+          {isOpen ? (
+            <ChevronDown className="ml-2 h-4 w-4 text-gray-500" />
+          ) : (
+            <ChevronRight className="ml-2 h-4 w-4 text-gray-500" />
+          )}
+        </button>
 
-        <div className="space-y-1">
-          {transcribeLater.recordings.map((recording) => (
-            <div
-              key={recording.id}
-              className="group rounded-md px-3 py-2 text-sm hover:bg-amber-50"
-            >
-              <div className="flex items-start gap-2">
-                <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
-                  <FileAudio className="h-3.5 w-3.5 text-amber-700" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <button
-                    className="block w-full truncate text-left font-medium text-gray-800"
-                    onClick={() => transcribeLater.transcribe(recording)}
-                    title={recording.title}
-                  >
-                    {getTranscribeLaterTitle(recording)}
-                  </button>
-                  <div className="mt-0.5 truncate text-xs text-gray-500">
-                    {getTranscribeLaterSubtitle(recording)}
+        {isOpen && (
+          <div className="space-y-1">
+            {transcribeLater.recordings.map((recording) => (
+              <div
+                key={recording.id}
+                className="group rounded-md px-3 py-2 text-sm hover:bg-amber-50"
+              >
+                <div className="flex items-start gap-2">
+                  <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+                    <FileAudio className="h-3.5 w-3.5 text-amber-700" />
                   </div>
-                  <div className="mt-1 flex items-center gap-1">
+                  <div className="min-w-0 flex-1">
                     <button
-                      className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
+                      className="block w-full truncate text-left font-medium text-gray-800"
                       onClick={() => transcribeLater.transcribe(recording)}
-                      title="Transcribe"
-                      aria-label="Transcribe recording"
+                      title={recording.title}
                     >
-                      <Play className="h-3.5 w-3.5" />
+                      {getTranscribeLaterTitle(recording)}
                     </button>
-                    <button
-                      className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
-                      onClick={() => transcribeLater.openFolder(recording)}
-                      title="Open Folder"
-                      aria-label="Open recording folder"
-                    >
-                      <FolderOpen className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
-                      onClick={() => transcribeLater.hide(recording)}
-                      title="Hide"
-                      aria-label="Hide recording from To Transcribe"
-                    >
-                      <EyeOff className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="mt-0.5 truncate text-xs text-gray-500">
+                      {getTranscribeLaterSubtitle(recording)}
+                    </div>
+                    <div className="mt-1 flex items-center gap-1">
+                      <button
+                        className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
+                        onClick={() => transcribeLater.transcribe(recording)}
+                        title="Transcribe"
+                        aria-label="Transcribe recording"
+                      >
+                        <Play className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
+                        onClick={() => transcribeLater.openFolder(recording)}
+                        title="Open Folder"
+                        aria-label="Open recording folder"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        className="rounded-md p-1 text-gray-500 hover:bg-gray-100"
+                        onClick={() => transcribeLater.hide(recording)}
+                        title="Hide"
+                        aria-label="Hide recording from To Transcribe"
+                      >
+                        <EyeOff className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -837,23 +896,35 @@ const Sidebar: React.FC = () => {
 
                 {filteredSidebarItems.filter(item => item.type === 'folder').map(item => (
                   <div key={item.id}>
-                    <div className="flex items-center transition-all duration-150 p-3 text-lg font-semibold h-10 mx-3 mt-3 rounded-lg">
+                    <button
+                      type="button"
+                      className="flex h-10 w-[calc(100%-1.5rem)] items-center rounded-lg p-3 mx-3 mt-3 text-left text-lg font-semibold text-gray-700 transition-all duration-150 hover:bg-gray-50"
+                      onClick={() => openSidebarAccordionSection('meetings')}
+                      aria-expanded={openSidebarSection === 'meetings'}
+                    >
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
-                      <span className="text-gray-700">{item.title}</span>
+                      <span className="flex-1">{item.title}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
                       )}
-                    </div>
+                      {openSidebarSection === 'meetings' ? (
+                        <ChevronDown className="ml-2 h-4 w-4 text-gray-500" />
+                      ) : (
+                        <ChevronRight className="ml-2 h-4 w-4 text-gray-500" />
+                      )}
+                    </button>
                   </div>
                 ))}
 
-                {filteredSidebarItems
-                  .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
-                  .map(item => (
-                    <div key={`${item.id}-children`} className="mx-3">
-                      {item.children!.map(child => renderItem(child, 1))}
-                    </div>
-                  ))}
+                {openSidebarSection === 'meetings' && (
+                  filteredSidebarItems
+                    .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
+                    .map(item => (
+                      <div key={`${item.id}-children`} className="mx-3">
+                        {item.children!.map(child => renderItem(child, 1))}
+                      </div>
+                    ))
+                )}
               </div>
             )}
           </div>
