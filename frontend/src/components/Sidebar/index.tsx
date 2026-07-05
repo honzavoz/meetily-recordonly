@@ -18,11 +18,12 @@ import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranscribeLaterRecordings } from '@/hooks/useTranscribeLaterRecordings';
 import {
-  getAvailableSidebarAccordionSection,
-  getDefaultSidebarAccordionSection,
-  isSidebarAccordionSection,
+  getDefaultSidebarSectionState,
+  getNextSidebarSectionState,
+  LEGACY_SIDEBAR_ACCORDION_STORAGE_KEY,
   SIDEBAR_ACCORDION_STORAGE_KEY,
   type SidebarAccordionSection,
+  type SidebarSectionState,
 } from '@/lib/sidebar-accordion';
 import { getTranscribeLaterSubtitle, getTranscribeLaterTitle } from '@/lib/transcribe-later';
 
@@ -73,14 +74,18 @@ const Sidebar: React.FC = () => {
   const transcribeLater = useTranscribeLaterRecordings();
   const hasTranscribeLaterRecordings = betaFeatures.importAndRetranscribe && transcribeLater.recordings.length > 0;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
-  const [openSidebarSection, setOpenSidebarSection] = useState<SidebarAccordionSection>(() => {
+  const [sidebarSectionState, setSidebarSectionState] = useState<SidebarSectionState>(() => {
     if (typeof window === 'undefined') {
-      return 'meetings';
+      return {
+        transcribeLaterOpen: false,
+        meetingsOpen: true,
+      };
     }
 
-    return getDefaultSidebarAccordionSection({
+    return getDefaultSidebarSectionState({
       hasPendingRecordings: false,
-      storedSection: window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY),
+      storedState: window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY),
+      legacyStoredSection: window.localStorage.getItem(LEGACY_SIDEBAR_ACCORDION_STORAGE_KEY),
     });
   });
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -131,26 +136,30 @@ const Sidebar: React.FC = () => {
       return;
     }
 
-    const storedSection = window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY);
-    const nextSection = getDefaultSidebarAccordionSection({
+    const nextState = getDefaultSidebarSectionState({
       hasPendingRecordings: hasTranscribeLaterRecordings,
-      storedSection,
+      storedState: window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY),
+      legacyStoredSection: window.localStorage.getItem(LEGACY_SIDEBAR_ACCORDION_STORAGE_KEY),
     });
 
-    setOpenSidebarSection(nextSection);
+    setSidebarSectionState(nextState);
   }, [hasTranscribeLaterRecordings]);
 
-  const openSidebarAccordionSection = useCallback((section: SidebarAccordionSection) => {
-    const nextSection = getAvailableSidebarAccordionSection({
-      requestedSection: section,
-      hasPendingRecordings: hasTranscribeLaterRecordings,
+  const toggleSidebarSection = useCallback((section: SidebarAccordionSection) => {
+    setSidebarSectionState((currentState) => {
+      const nextState = getNextSidebarSectionState({
+        currentState,
+        section,
+        hasPendingRecordings: hasTranscribeLaterRecordings,
+      });
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SIDEBAR_ACCORDION_STORAGE_KEY, JSON.stringify(nextState));
+        window.localStorage.removeItem(LEGACY_SIDEBAR_ACCORDION_STORAGE_KEY);
+      }
+
+      return nextState;
     });
-
-    setOpenSidebarSection(nextSection);
-
-    if (typeof window !== 'undefined' && isSidebarAccordionSection(nextSection)) {
-      window.localStorage.setItem(SIDEBAR_ACCORDION_STORAGE_KEY, nextSection);
-    }
   }, [hasTranscribeLaterRecordings]);
 
   useEffect(() => {
@@ -734,14 +743,14 @@ const Sidebar: React.FC = () => {
       return null;
     }
 
-    const isOpen = openSidebarSection === 'transcribeLater';
+    const isOpen = sidebarSectionState.transcribeLaterOpen;
 
     return (
       <div className="mx-3 mt-3 pb-2">
         <button
           type="button"
           className="flex h-10 w-full items-center rounded-lg px-3 text-left text-lg font-semibold text-gray-700 hover:bg-gray-50"
-          onClick={() => openSidebarAccordionSection('transcribeLater')}
+          onClick={() => toggleSidebarSection('transcribeLater')}
           aria-expanded={isOpen}
         >
           <FileAudio className="w-4 h-4 mr-2 text-amber-700" />
@@ -899,15 +908,15 @@ const Sidebar: React.FC = () => {
                     <button
                       type="button"
                       className="flex h-10 w-[calc(100%-1.5rem)] items-center rounded-lg p-3 mx-3 mt-3 text-left text-lg font-semibold text-gray-700 transition-all duration-150 hover:bg-gray-50"
-                      onClick={() => openSidebarAccordionSection('meetings')}
-                      aria-expanded={openSidebarSection === 'meetings'}
+                      onClick={() => toggleSidebarSection('meetings')}
+                      aria-expanded={sidebarSectionState.meetingsOpen}
                     >
                       <NotebookPen className="w-4 h-4 mr-2 text-gray-600" />
                       <span className="flex-1">{item.title}</span>
                       {searchQuery && item.id === 'meetings' && isSearching && (
                         <span className="ml-2 text-xs text-blue-500 animate-pulse">Searching...</span>
                       )}
-                      {openSidebarSection === 'meetings' ? (
+                      {sidebarSectionState.meetingsOpen ? (
                         <ChevronDown className="ml-2 h-4 w-4 text-gray-500" />
                       ) : (
                         <ChevronRight className="ml-2 h-4 w-4 text-gray-500" />
@@ -916,7 +925,7 @@ const Sidebar: React.FC = () => {
                   </div>
                 ))}
 
-                {openSidebarSection === 'meetings' && (
+                {sidebarSectionState.meetingsOpen && (
                   filteredSidebarItems
                     .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
                     .map(item => (
