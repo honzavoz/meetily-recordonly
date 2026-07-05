@@ -16,6 +16,16 @@ pub struct TemplateInfo {
     pub description: String,
 }
 
+/// Full template section details used for external/manual AI prompts
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TemplateSectionDetails {
+    pub title: String,
+    pub instruction: String,
+    pub format: String,
+    pub item_format: Option<String>,
+    pub example_item_format: Option<String>,
+}
+
 /// Detailed template structure for preview/debugging
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TemplateDetails {
@@ -28,8 +38,8 @@ pub struct TemplateDetails {
     /// Description
     pub description: String,
 
-    /// List of section titles in order
-    pub sections: Vec<String>,
+    /// Full section definitions in order
+    pub sections: Vec<TemplateSectionDetails>,
 }
 
 /// Lists all available templates
@@ -77,17 +87,23 @@ pub async fn api_get_template_details<R: Runtime>(
 
     let template = templates::get_template(&template_id)?;
 
-    let section_titles: Vec<String> = template
+    let sections: Vec<TemplateSectionDetails> = template
         .sections
-        .iter()
-        .map(|section| section.title.clone())
+        .into_iter()
+        .map(|section| TemplateSectionDetails {
+            title: section.title,
+            instruction: section.instruction,
+            format: section.format,
+            item_format: section.item_format,
+            example_item_format: section.example_item_format,
+        })
         .collect();
 
     let details = TemplateDetails {
         id: template_id,
         name: template.name,
         description: template.description,
-        sections: section_titles,
+        sections,
     };
 
     info!("Retrieved template details for '{}'", details.name);

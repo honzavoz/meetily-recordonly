@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
+import { Clipboard, ClipboardPaste, Sparkles, Settings, Loader2, FileText, Check, Square } from 'lucide-react';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -39,6 +39,9 @@ interface SummaryGeneratorButtonGroupProps {
   hasTranscripts?: boolean;
   hasSummary?: boolean;
   isModelConfigLoading?: boolean;
+  isPreparingExternalAI?: boolean;
+  onPrepareExternalAI?: () => void;
+  onOpenPasteExternalAI?: () => void;
   onOpenModelSettings?: (openFn: () => void) => void;
 }
 
@@ -56,6 +59,9 @@ export function SummaryGeneratorButtonGroup({
   hasTranscripts = true,
   hasSummary = false,
   isModelConfigLoading = false,
+  isPreparingExternalAI = false,
+  onPrepareExternalAI,
+  onOpenPasteExternalAI,
   onOpenModelSettings,
   languageSlot
 }: SummaryGeneratorButtonGroupProps) {
@@ -292,6 +298,41 @@ export function SummaryGeneratorButtonGroup({
       )}
 
       {languageSlot}
+
+      {!isGenerating && (
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              Analytics.trackButtonClick('copy_external_ai_prompt', 'meeting_details');
+              onPrepareExternalAI?.();
+            }}
+            disabled={isPreparingExternalAI}
+            title="Copy a template-aware prompt for ChatGPT, Claude, Gemini, or another external AI"
+          >
+            {isPreparingExternalAI ? (
+              <Loader2 className="animate-spin xl:mr-2" size={18} />
+            ) : (
+              <Clipboard className="xl:mr-2" size={18} />
+            )}
+            <span className="hidden lg:inline">External AI</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              Analytics.trackButtonClick('paste_external_ai_result', 'meeting_details');
+              onOpenPasteExternalAI?.();
+            }}
+            title="Paste an external AI Markdown result back into meeting notes"
+          >
+            <ClipboardPaste className="xl:mr-2" size={18} />
+            <span className="hidden lg:inline">Paste AI Result</span>
+          </Button>
+        </>
+      )}
 
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>

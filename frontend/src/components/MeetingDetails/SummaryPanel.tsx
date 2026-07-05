@@ -16,11 +16,22 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { LanguagePickerPopover } from '@/components/LanguagePickerPopover';
 import { useRecentLanguages } from '@/hooks/useRecentLanguages';
 import { labelForCode } from '@/lib/summary-languages';
+import { useExternalAISummary } from '@/hooks/meeting-details/useExternalAISummary';
 import {
   readMeetingSummaryLanguage,
   saveMeetingSummaryLanguage,
   SummaryLanguageStorage,
 } from '@/lib/summary-language-preferences';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface SummaryPanelProps {
   meeting: {
@@ -252,6 +263,19 @@ export function SummaryPanel({
     </Popover>
   );
 
+  const externalAI = useExternalAISummary({
+    meeting,
+    meetingTitle,
+    selectedTemplate,
+    customPrompt,
+    summaryLanguageLabel: effectiveLangLabel,
+    hasSummary: !!aiSummary,
+    onSaveSummary: async (summary) => onSaveSummary(summary),
+    setAiSummary: (summary) => onSummaryChange(summary as Summary),
+  });
+
+  const selectedExternalPrompt = externalAI.promptPackage?.parts[externalAI.selectedPromptIndex] ?? null;
+
   return (
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
       {/* Title area */}
@@ -283,6 +307,9 @@ export function SummaryPanel({
                 hasTranscripts={transcripts.length > 0}
                 hasSummary={!!aiSummary}
                 isModelConfigLoading={isModelConfigLoading}
+                isPreparingExternalAI={externalAI.isPreparingPrompt}
+                onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
+                onOpenPasteExternalAI={externalAI.openPasteDialog}
                 onOpenModelSettings={onOpenModelSettings}
                 languageSlot={languageSlot}
               />
@@ -324,6 +351,9 @@ export function SummaryPanel({
               onTemplateSelect={onTemplateSelect}
               hasTranscripts={transcripts.length > 0}
               isModelConfigLoading={isModelConfigLoading}
+              isPreparingExternalAI={externalAI.isPreparingPrompt}
+              onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
+              onOpenPasteExternalAI={externalAI.openPasteDialog}
               onOpenModelSettings={onOpenModelSettings}
             />
           </div>
@@ -353,6 +383,9 @@ export function SummaryPanel({
               hasTranscripts={transcripts.length > 0}
               hasSummary={false}
               isModelConfigLoading={isModelConfigLoading}
+              isPreparingExternalAI={externalAI.isPreparingPrompt}
+              onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
+              onOpenPasteExternalAI={externalAI.openPasteDialog}
               onOpenModelSettings={onOpenModelSettings}
               languageSlot={transcripts.length > 0 ? languageSlot : undefined}
             />
@@ -441,6 +474,137 @@ export function SummaryPanel({
           )}
         </div>
       )}
+
+      <Dialog open={externalAI.promptDialogOpen} onOpenChange={externalAI.setPromptDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>External AI Prompt</DialogTitle>
+            <DialogDescription>
+              Paste the copied prompt into ChatGPT, Claude, Gemini, or another AI tool. Then paste the Markdown result back into Meetily.
+            </DialogDescription>
+          </DialogHeader>
+
+          {externalAI.promptPackage?.warning && (
+            <Alert>
+              <AlertTitle>Long transcript split into parts</AlertTitle>
+              <AlertDescription>
+                Copy each part into the external AI first, then copy the final merge prompt after you have the partial summaries.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {externalAI.promptPackage && externalAI.promptPackage.parts.length > 1 && (
+            <div className="flex flex-wrap gap-2">
+              {externalAI.promptPackage.parts.map((part, index) => (
+                <Button
+                  key={part.title}
+                  type="button"
+                  variant={externalAI.selectedPromptIndex === index ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => externalAI.copyPromptPart(index)}
+                >
+                  {part.title}
+                </Button>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={externalAI.copyMergePrompt}
+              >
+                Final merge prompt
+              </Button>
+            </div>
+          )}
+
+          <Textarea
+            readOnly
+            value={selectedExternalPrompt?.text ?? ''}
+            className="min-h-[340px] resize-y font-mono text-xs"
+          />
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => externalAI.setPromptDialogOpen(false)}
+            >
+              Close
+            </Button>
+            <Button
+              type="button"
+              onClick={() => externalAI.copyPromptPart(externalAI.selectedPromptIndex)}
+              disabled={!selectedExternalPrompt}
+            >
+              Copy current prompt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={externalAI.pasteDialogOpen} onOpenChange={externalAI.setPasteDialogOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Paste AI Result</DialogTitle>
+            <DialogDescription>
+              Paste the Markdown answer from your external AI. It will be saved as this meeting's notes.
+            </DialogDescription>
+          </DialogHeader>
+
+          {aiSummary && (
+            <Alert>
+              <AlertTitle>Existing notes will be replaced</AlertTitle>
+              <AlertDescription>
+                This meeting already has notes. Confirm replacement before saving the pasted AI result.
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <Textarea
+            value={externalAI.pasteValue}
+            onChange={(event) => externalAI.setPasteValue(event.target.value)}
+            placeholder="Paste the external AI Markdown result here..."
+            className="min-h-[320px] resize-y font-mono text-sm"
+          />
+
+          {aiSummary && (
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={externalAI.overwriteConfirmed}
+                onChange={(event) => externalAI.setOverwriteConfirmed(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300"
+              />
+              Replace existing meeting notes
+            </label>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={externalAI.pasteFromClipboard}
+            >
+              Paste from Clipboard
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => externalAI.setPasteDialogOpen(false)}
+              disabled={externalAI.isSavingPaste}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={externalAI.savePastedResult}
+              disabled={externalAI.isSavingPaste || !externalAI.pasteValue.trim() || (!!aiSummary && !externalAI.overwriteConfirmed)}
+            >
+              {externalAI.isSavingPaste ? 'Saving...' : 'Save as Meeting Notes'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
