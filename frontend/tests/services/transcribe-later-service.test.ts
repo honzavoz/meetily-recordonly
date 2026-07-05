@@ -47,4 +47,17 @@ describe("TranscribeLaterService", () => {
       audioPath: pendingRecording.audioPath,
     });
   });
+
+  test("renames a pending recording folder", async () => {
+    const service = new TranscribeLaterService();
+    const pendingRecording = recording();
+
+    await service.rename(pendingRecording, "Client kickoff");
+
+    expect(invokeMock).toHaveBeenCalledWith("rename_transcribe_later_recording", {
+      folderPath: pendingRecording.folderPath,
+      audioPath: pendingRecording.audioPath,
+      title: "Client kickoff",
+    });
+  });
 });

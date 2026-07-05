@@ -135,6 +135,11 @@ const Sidebar: React.FC = () => {
     isOpen: boolean;
     recording: TranscribeLaterRecording | null;
   }>({ isOpen: false, recording: null });
+  const [transcribeRenameModalState, setTranscribeRenameModalState] = useState<{
+    isOpen: boolean;
+    recording: TranscribeLaterRecording | null;
+  }>({ isOpen: false, recording: null });
+  const [transcribeEditingTitle, setTranscribeEditingTitle] = useState<string>('');
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -428,6 +433,34 @@ const Sidebar: React.FC = () => {
       transcribeLater.deleteRecording(transcribeDeleteModalState.recording);
     }
     setTranscribeDeleteModalState({ isOpen: false, recording: null });
+  };
+
+  const handleTranscribeRenameStart = (recording: TranscribeLaterRecording) => {
+    setTranscribeRenameModalState({ isOpen: true, recording });
+    setTranscribeEditingTitle(getTranscribeLaterTitle(recording));
+  };
+
+  const handleTranscribeRenameConfirm = async () => {
+    const newTitle = transcribeEditingTitle.trim();
+    const recording = transcribeRenameModalState.recording;
+
+    if (!recording) return;
+
+    if (!newTitle) {
+      toast.error("Recording title cannot be empty");
+      return;
+    }
+
+    const didRename = await transcribeLater.rename(recording, newTitle);
+    if (didRename) {
+      setTranscribeRenameModalState({ isOpen: false, recording: null });
+      setTranscribeEditingTitle('');
+    }
+  };
+
+  const handleTranscribeRenameCancel = () => {
+    setTranscribeRenameModalState({ isOpen: false, recording: null });
+    setTranscribeEditingTitle('');
   };
 
   // Handle modal editing of meeting names
@@ -818,6 +851,14 @@ const Sidebar: React.FC = () => {
                       </button>
                       <button
                         className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
+                        onClick={() => handleTranscribeRenameStart(recording)}
+                        title="Rename"
+                        aria-label="Rename recording"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
                         onClick={() => transcribeLater.openFolder(recording)}
                         title="Open Folder"
                         aria-label="Open recording folder"
@@ -1020,6 +1061,56 @@ const Sidebar: React.FC = () => {
         onConfirm={handleTranscribeDeleteConfirm}
         onCancel={() => setTranscribeDeleteModalState({ isOpen: false, recording: null })}
       />
+
+      <Dialog open={transcribeRenameModalState.isOpen} onOpenChange={(open) => {
+        if (!open) handleTranscribeRenameCancel();
+      }}>
+        <DialogContent className="sm:max-w-[425px]">
+          <VisuallyHidden>
+            <DialogTitle>Rename Recording</DialogTitle>
+          </VisuallyHidden>
+          <div className="py-4">
+            <h3 className="text-lg font-semibold mb-4">Rename Recording</h3>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="recording-title" className="block text-sm font-medium text-gray-700 mb-2">
+                  Recording Title
+                </label>
+                <input
+                  id="recording-title"
+                  type="text"
+                  value={transcribeEditingTitle}
+                  onChange={(e) => setTranscribeEditingTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleTranscribeRenameConfirm();
+                    } else if (e.key === 'Escape') {
+                      handleTranscribeRenameCancel();
+                    }
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Enter recording title"
+                  autoFocus
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={handleTranscribeRenameCancel}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleTranscribeRenameConfirm}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+            >
+              Save
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Meeting Title Modal */}
       <Dialog open={editModalState.isOpen} onOpenChange={(open) => {

@@ -307,6 +307,101 @@ fn ensure_audio_inside_folder(folder_path: &str, audio_path: &str) -> Result<Pat
     Ok(canonical_folder)
 }
 
+fn sanitize_recording_title(title: &str) -> Result<String, String> {
+    let sanitized = title
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+            {
+                '-'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let sanitized = sanitized.chars().take(120).collect::<String>();
+    let sanitized = sanitized.trim_matches('.').trim().to_string();
+
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
+        return Err("Recording title cannot be empty".to_string());
+    }
+
+    Ok(sanitized)
+}
+
+fn paths_refer_to_same_file(path: &Path, other: &Path) -> bool {
+    match (path.canonicalize(), other.canonicalize()) {
+        (Ok(path), Ok(other)) => path == other,
+        _ => path == other,
+    }
+}
+
+fn unique_child_path(
+    parent: &Path,
+    stem: &str,
+    extension: Option<&str>,
+    current_path: Option<&Path>,
+) -> Result<PathBuf, String> {
+    for index in 0..1000 {
+        let name = match (index, extension) {
+            (0, Some(ext)) => format!("{}.{}", stem, ext),
+            (0, None) => stem.to_string(),
+            (_, Some(ext)) => format!("{} ({}).{}", stem, index + 1, ext),
+            (_, None) => format!("{} ({})", stem, index + 1),
+        };
+        let candidate = parent.join(name);
+
+        if let Some(current) = current_path {
+            if paths_refer_to_same_file(&candidate, current) {
+                return Ok(candidate);
+            }
+        }
+
+        if !candidate.exists() {
+            return Ok(candidate);
+        }
+    }
+
+    Err("Could not find an available recording name".to_string())
+}
+
+fn update_metadata_after_rename(
+    folder_path: &Path,
+    title: &str,
+    audio_file_name: &str,
+) -> Result<(), String> {
+    let metadata_path = folder_path.join("metadata.json");
+    if !metadata_path.exists() {
+        return Ok(());
+    }
+
+    let raw = fs::read_to_string(&metadata_path)
+        .map_err(|e| format!("Failed to read recording metadata: {}", e))?;
+    let mut value = serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(|_| {
+        serde_json::json!({})
+    });
+
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+
+    if let Some(object) = value.as_object_mut() {
+        object.insert("meeting_name".to_string(), serde_json::json!(title));
+        object.insert("title".to_string(), serde_json::json!(title));
+        object.insert("audio_file".to_string(), serde_json::json!(audio_file_name));
+    }
+
+    let raw = serde_json::to_string_pretty(&value)
+        .map_err(|e| format!("Failed to serialize recording metadata: {}", e))?;
+    fs::write(&metadata_path, raw)
+        .map_err(|e| format!("Failed to update recording metadata: {}", e))
+}
+
 fn open_path_with_system(path: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -413,4 +508,60 @@ pub async fn delete_transcribe_later_recording(
     let folder = ensure_audio_inside_folder(&folder_path, &audio_path)?;
     fs::remove_dir_all(&folder)
         .map_err(|e| format!("Failed to delete recording folder: {}", e))
+}
+
+#[tauri::command]
+pub async fn rename_transcribe_later_recording(
+    folder_path: String,
+    audio_path: String,
+    title: String,
+) -> Result<(), String> {
+    let folder = ensure_audio_inside_folder(&folder_path, &audio_path)?;
+    let audio = PathBuf::from(&audio_path)
+        .canonicalize()
+        .map_err(|e| format!("Failed to resolve recording audio: {}", e))?;
+    let sanitized_title = sanitize_recording_title(&title)?;
+    let parent = folder
+        .parent()
+        .ok_or_else(|| "Recording folder has no parent directory".to_string())?;
+    let target_folder = unique_child_path(parent, &sanitized_title, None, Some(&folder))?;
+
+    let original_audio_file_name = audio
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Recording audio has no file name".to_string())?
+        .to_string();
+
+    if !paths_refer_to_same_file(&target_folder, &folder) {
+        fs::rename(&folder, &target_folder)
+            .map_err(|e| format!("Failed to rename recording folder: {}", e))?;
+    }
+
+    let audio_after_folder_rename = target_folder.join(&original_audio_file_name);
+    let mut metadata_audio_file_name = original_audio_file_name.clone();
+
+    if !original_audio_file_name.eq_ignore_ascii_case("audio.mp4") {
+        let extension = audio_after_folder_rename
+            .extension()
+            .and_then(|ext| ext.to_str());
+        let target_audio = unique_child_path(
+            &target_folder,
+            &sanitized_title,
+            extension,
+            Some(&audio_after_folder_rename),
+        )?;
+
+        if !paths_refer_to_same_file(&target_audio, &audio_after_folder_rename) {
+            fs::rename(&audio_after_folder_rename, &target_audio)
+                .map_err(|e| format!("Failed to rename recording audio: {}", e))?;
+        }
+
+        metadata_audio_file_name = target_audio
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Renamed recording audio has no file name".to_string())?
+            .to_string();
+    }
+
+    update_metadata_after_rename(&target_folder, &sanitized_title, &metadata_audio_file_name)
 }

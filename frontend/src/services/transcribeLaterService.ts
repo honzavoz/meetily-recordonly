@@ -35,6 +35,14 @@ export class TranscribeLaterService {
     });
   }
 
+  async rename(recording: TranscribeLaterRecording, title: string): Promise<void> {
+    await invoke('rename_transcribe_later_recording', {
+      folderPath: recording.folderPath,
+      audioPath: recording.audioPath,
+      title,
+    });
+  }
+
   async openFolder(recording: TranscribeLaterRecording): Promise<void> {
     await invoke('open_transcribe_later_recording_folder', {
       folderPath: recording.folderPath,

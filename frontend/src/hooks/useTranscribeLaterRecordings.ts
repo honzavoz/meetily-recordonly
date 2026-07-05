@@ -87,6 +87,22 @@ export function useTranscribeLaterRecordings() {
     }
   }, [refresh]);
 
+  const rename = useCallback(async (recording: TranscribeLaterRecording, title: string) => {
+    try {
+      await transcribeLaterService.rename(recording, title);
+      toast.success('Recording renamed');
+      await refresh();
+      return true;
+    } catch (error) {
+      console.error('Failed to rename recording:', error);
+      toast.error('Could not rename recording', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      await refresh();
+      return false;
+    }
+  }, [refresh]);
+
   const openFolder = useCallback(async (recording: TranscribeLaterRecording) => {
     try {
       await transcribeLaterService.openFolder(recording);
@@ -107,6 +123,7 @@ export function useTranscribeLaterRecordings() {
     hide,
     play,
     deleteRecording,
+    rename,
     openFolder,
   };
 }
