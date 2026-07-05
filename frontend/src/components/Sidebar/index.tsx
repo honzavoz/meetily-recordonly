@@ -25,7 +25,12 @@ import {
   type SidebarAccordionSection,
   type SidebarSectionState,
 } from '@/lib/sidebar-accordion';
-import { getTranscribeLaterSubtitle, getTranscribeLaterTitle } from '@/lib/transcribe-later';
+import {
+  filterTranscribeLaterRecordings,
+  getTranscribeLaterDeleteConfirmationText,
+  getTranscribeLaterSubtitle,
+  getTranscribeLaterTitle,
+} from '@/lib/transcribe-later';
 import type { TranscribeLaterRecording } from '@/lib/transcribe-later';
 
 import {
@@ -73,7 +78,8 @@ const Sidebar: React.FC = () => {
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
   const transcribeLater = useTranscribeLaterRecordings();
-  const hasTranscribeLaterRecordings = betaFeatures.importAndRetranscribe && transcribeLater.recordings.length > 0;
+  const hasTranscribeLaterSection = betaFeatures.importAndRetranscribe;
+  const hasTranscribeLaterRecordings = transcribeLater.recordings.length > 0;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
   const [sidebarSectionState, setSidebarSectionState] = useState<SidebarSectionState>(() => {
     if (typeof window === 'undefined') {
@@ -90,6 +96,7 @@ const Sidebar: React.FC = () => {
     });
   });
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [transcribeSearchQuery, setTranscribeSearchQuery] = useState<string>('');
   const [showModelSettings, setShowModelSettings] = useState(false);
   const [modelConfig, setModelConfig] = useState<ModelConfig>({
     provider: 'ollama',
@@ -140,6 +147,7 @@ const Sidebar: React.FC = () => {
     recording: TranscribeLaterRecording | null;
   }>({ isOpen: false, recording: null });
   const [transcribeEditingTitle, setTranscribeEditingTitle] = useState<string>('');
+  const [renamingTranscribeRecordingId, setRenamingTranscribeRecordingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -147,20 +155,20 @@ const Sidebar: React.FC = () => {
     }
 
     const nextState = getDefaultSidebarSectionState({
-      hasPendingRecordings: hasTranscribeLaterRecordings,
+      hasPendingRecordings: hasTranscribeLaterSection,
       storedState: window.localStorage.getItem(SIDEBAR_ACCORDION_STORAGE_KEY),
       legacyStoredSection: window.localStorage.getItem(LEGACY_SIDEBAR_ACCORDION_STORAGE_KEY),
     });
 
     setSidebarSectionState(nextState);
-  }, [hasTranscribeLaterRecordings]);
+  }, [hasTranscribeLaterSection]);
 
   const toggleSidebarSection = useCallback((section: SidebarAccordionSection) => {
     setSidebarSectionState((currentState) => {
       const nextState = getNextSidebarSectionState({
         currentState,
         section,
-        hasPendingRecordings: hasTranscribeLaterRecordings,
+        hasPendingRecordings: hasTranscribeLaterSection,
       });
 
       if (typeof window !== 'undefined') {
@@ -170,7 +178,7 @@ const Sidebar: React.FC = () => {
 
       return nextState;
     });
-  }, [hasTranscribeLaterRecordings]);
+  }, [hasTranscribeLaterSection]);
 
   useEffect(() => {
     // Note: Don't set hardcoded defaults - let DB be the source of truth
@@ -451,10 +459,15 @@ const Sidebar: React.FC = () => {
       return;
     }
 
-    const didRename = await transcribeLater.rename(recording, newTitle);
-    if (didRename) {
-      setTranscribeRenameModalState({ isOpen: false, recording: null });
-      setTranscribeEditingTitle('');
+    setRenamingTranscribeRecordingId(recording.id);
+    try {
+      const didRename = await transcribeLater.rename(recording, newTitle);
+      if (didRename) {
+        setTranscribeRenameModalState({ isOpen: false, recording: null });
+        setTranscribeEditingTitle('');
+      }
+    } finally {
+      setRenamingTranscribeRecordingId(null);
     }
   };
 
@@ -784,11 +797,15 @@ const Sidebar: React.FC = () => {
   };
 
   const renderTranscribeLaterSection = () => {
-    if (!hasTranscribeLaterRecordings) {
+    if (!hasTranscribeLaterSection) {
       return null;
     }
 
     const isOpen = sidebarSectionState.transcribeLaterOpen;
+    const visibleRecordings = filterTranscribeLaterRecordings(
+      transcribeLater.recordings,
+      transcribeSearchQuery,
+    );
 
     return (
       <div className="mx-3 mt-3 pb-2">
@@ -800,7 +817,7 @@ const Sidebar: React.FC = () => {
         >
           <FileAudio className="w-4 h-4 mr-2 text-amber-700" />
           <span className="flex-1">To Transcribe</span>
-          <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
+          <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${hasTranscribeLaterRecordings ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-500'}`}>
             {transcribeLater.recordings.length}
           </span>
           {isOpen ? (
@@ -812,7 +829,33 @@ const Sidebar: React.FC = () => {
 
         {isOpen && (
           <div className="space-y-1">
-            {transcribeLater.recordings.map((recording) => (
+            {hasTranscribeLaterRecordings && (
+              <div className="relative px-1 pb-1">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                <input
+                  type="search"
+                  value={transcribeSearchQuery}
+                  onChange={(event) => setTranscribeSearchQuery(event.target.value)}
+                  className="h-8 w-full rounded-md border border-gray-200 bg-white pl-8 pr-2 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                  placeholder="Search recordings"
+                  aria-label="Search To Transcribe recordings"
+                />
+              </div>
+            )}
+
+            {!hasTranscribeLaterRecordings && (
+              <div className="mx-1 rounded-md border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-500">
+                Record-only recordings will appear here.
+              </div>
+            )}
+
+            {hasTranscribeLaterRecordings && visibleRecordings.length === 0 && (
+              <div className="mx-1 rounded-md border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-500">
+                No recordings match this search.
+              </div>
+            )}
+
+            {visibleRecordings.map((recording) => (
               <div
                 key={recording.id}
                 className="group rounded-md px-3 py-2 text-sm hover:bg-amber-50"
@@ -852,6 +895,7 @@ const Sidebar: React.FC = () => {
                       <button
                         className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
                         onClick={() => handleTranscribeRenameStart(recording)}
+                        disabled={renamingTranscribeRecordingId === recording.id}
                         title="Rename"
                         aria-label="Rename recording"
                       >
@@ -1057,7 +1101,7 @@ const Sidebar: React.FC = () => {
 
       <ConfirmationModal
         isOpen={transcribeDeleteModalState.isOpen}
-        text="Delete this recording folder? This will remove the audio, metadata, and any saved files for this record-only meeting."
+        text={getTranscribeLaterDeleteConfirmationText(transcribeDeleteModalState.recording)}
         onConfirm={handleTranscribeDeleteConfirm}
         onCancel={() => setTranscribeDeleteModalState({ isOpen: false, recording: null })}
       />
@@ -1082,6 +1126,9 @@ const Sidebar: React.FC = () => {
                   value={transcribeEditingTitle}
                   onChange={(e) => setTranscribeEditingTitle(e.target.value)}
                   onKeyDown={(e) => {
+                    if (renamingTranscribeRecordingId) {
+                      return;
+                    }
                     if (e.key === 'Enter') {
                       handleTranscribeRenameConfirm();
                     } else if (e.key === 'Escape') {
@@ -1090,6 +1137,7 @@ const Sidebar: React.FC = () => {
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="Enter recording title"
+                  disabled={Boolean(renamingTranscribeRecordingId)}
                   autoFocus
                 />
               </div>
@@ -1098,15 +1146,17 @@ const Sidebar: React.FC = () => {
           <DialogFooter>
             <button
               onClick={handleTranscribeRenameCancel}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+              disabled={Boolean(renamingTranscribeRecordingId)}
+              className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60 rounded-md transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleTranscribeRenameConfirm}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+              disabled={Boolean(renamingTranscribeRecordingId) || !transcribeEditingTitle.trim()}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 rounded-md transition-colors"
             >
-              Save
+              {renamingTranscribeRecordingId ? 'Renaming...' : 'Save'}
             </button>
           </DialogFooter>
         </DialogContent>

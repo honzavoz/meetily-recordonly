@@ -100,3 +100,30 @@ export function getTranscribeLaterSubtitle(
 
   return parts.join(' • ');
 }
+
+export function filterTranscribeLaterRecordings(
+  recordings: TranscribeLaterRecording[],
+  query: string,
+): TranscribeLaterRecording[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return recordings;
+  }
+
+  return recordings.filter((recording) => {
+    const searchableText = [
+      getTranscribeLaterTitle(recording),
+      getTranscribeLaterSubtitle(recording),
+      recording.title,
+    ].join(' ').toLowerCase();
+
+    return searchableText.includes(normalizedQuery);
+  });
+}
+
+export function getTranscribeLaterDeleteConfirmationText(
+  recording: Pick<TranscribeLaterRecording, 'title'> | null | undefined,
+): string {
+  const title = recording ? getTranscribeLaterTitle(recording) : 'this recording';
+  return `Delete "${title}"? This will remove the audio, metadata, and any saved files for this record-only meeting.`;
+}

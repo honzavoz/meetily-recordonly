@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  filterTranscribeLaterRecordings,
   formatTranscribeLaterDuration,
+  getTranscribeLaterDeleteConfirmationText,
   getTranscribeLaterSubtitle,
   getTranscribeLaterTitle,
   isPendingTranscribeLaterRecording,
@@ -36,6 +38,29 @@ describe("transcribe later helpers", () => {
   test("shows duration and file size in the sidebar subtitle", () => {
     expect(getTranscribeLaterSubtitle(recording({ durationSeconds: 754, sizeBytes: 4_407_706 }))).toBe("12:34 • 4.2 MB");
     expect(getTranscribeLaterSubtitle(recording({ durationSeconds: null, sizeBytes: 154_112 }))).toBe("150.5 KB");
+  });
+
+  test("filters recordings by title and subtitle", () => {
+    const clientKickoff = recording({
+      title: "Client kickoff",
+      sizeBytes: 4_407_706,
+      durationSeconds: 754,
+    });
+    const planning = recording({
+      id: "/recordings/Planning/audio.mp4",
+      title: "Planning",
+      folderPath: "/recordings/Planning",
+      audioPath: "/recordings/Planning/audio.mp4",
+      sizeBytes: 154_112,
+    });
+
+    expect(filterTranscribeLaterRecordings([clientKickoff, planning], "kick")).toEqual([clientKickoff]);
+    expect(filterTranscribeLaterRecordings([clientKickoff, planning], "150.5")).toEqual([planning]);
+    expect(filterTranscribeLaterRecordings([clientKickoff, planning], "   ")).toEqual([clientKickoff, planning]);
+  });
+
+  test("includes the recording title in delete confirmation text", () => {
+    expect(getTranscribeLaterDeleteConfirmationText(recording({ title: "Client kickoff" }))).toContain('"Client kickoff"');
   });
 
   test("keeps pending recordings visible", () => {

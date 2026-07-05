@@ -250,6 +250,9 @@ export default function RootLayout({
     try {
       await transcribeLaterService.markTranscribed(transcribeLaterImport);
       window.dispatchEvent(new CustomEvent(REFRESH_TRANSCRIBE_LATER_EVENT));
+      toast.success('Removed from To Transcribe', {
+        description: `"${getTranscribeLaterTitle(transcribeLaterImport)}" is now in Meeting Notes.`,
+      });
     } catch (error) {
       console.error('[Layout] Failed to mark recording as transcribed:', error);
       toast.warning('Recording imported, but it may still appear in To Transcribe', {
