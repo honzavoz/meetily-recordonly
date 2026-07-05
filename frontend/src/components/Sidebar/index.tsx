@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, StickyNote, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, SearchIcon, X, Upload, FileAudio, FolderOpen, Play } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, Upload, FileAudio, FolderOpen, Play } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -31,6 +31,10 @@ import {
   getTranscribeLaterSubtitle,
   getTranscribeLaterTitle,
 } from '@/lib/transcribe-later';
+import {
+  filterSidebarMeetings,
+  getSidebarMeetingSubtitle,
+} from '@/lib/sidebar-meetings';
 import type { TranscribeLaterRecording } from '@/lib/transcribe-later';
 
 import {
@@ -45,13 +49,13 @@ import { MessageToast } from '../MessageToast';
 import Logo from '../Logo';
 import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
-import { Input } from '../ui/input';
-import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group';
 
 interface SidebarItem {
   id: string;
   title: string;
   type: 'folder' | 'file';
+  createdAt?: string | null;
+  updatedAt?: string | null;
   children?: SidebarItem[];
 }
 
@@ -350,8 +354,8 @@ const Sidebar: React.FC = () => {
               // Include if the meeting ID is in our search results
               if (matchedMeetingIds.has(item.id)) return true;
 
-              // Or if the title matches the search query
-              return item.title.toLowerCase().includes(searchQuery.toLowerCase());
+              // Or if the title/date matches the search query
+              return filterSidebarMeetings([item], searchQuery).length > 0;
             });
 
             return {
@@ -375,9 +379,7 @@ const Sidebar: React.FC = () => {
             if (!folder.children) return folder;
 
             // Filter children based on search query
-            const filteredChildren = folder.children.filter(item =>
-              item.title.toLowerCase().includes(searchQuery.toLowerCase())
-            );
+            const filteredChildren = filterSidebarMeetings(folder.children, searchQuery);
 
             return {
               ...folder,
@@ -751,7 +753,14 @@ const Sidebar: React.FC = () => {
                     <Plus className="w-3.5 h-3.5 text-blue-600" />
                   </div>
                 )}
-                <span className="flex-1 break-words">{item.title}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="break-words leading-tight">{item.title}</div>
+                  {isMeetingItem && getSidebarMeetingSubtitle(item) && (
+                    <div className="mt-0.5 truncate text-xs font-normal text-gray-500">
+                      {getSidebarMeetingSubtitle(item)}
+                    </div>
+                  )}
+                </div>
                 {isMeetingItem && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
                     <button
@@ -961,26 +970,6 @@ const Sidebar: React.FC = () => {
                   <span>Meetily</span>
                 </span> */}
                 <Logo isCollapsed={isCollapsed} />
-
-                <div className="relative mb-1">
-                  <InputGroup >
-                    <InputGroupInput placeholder='Search meeting content...' value={searchQuery}
-                      onChange={(e) => handleSearchChange(e.target.value)}
-                    />
-                    <InputGroupAddon>
-                      <SearchIcon />
-                    </InputGroupAddon>
-                    {searchQuery &&
-                      <InputGroupAddon align={'inline-end'}>
-                        <InputGroupButton
-                          onClick={() => handleSearchChange('')}
-                        >
-                          <X />
-                        </InputGroupButton>
-                      </InputGroupAddon>
-                    }
-                  </InputGroup>
-                </div>
               </div>
             )}
           </div>
@@ -1031,13 +1020,35 @@ const Sidebar: React.FC = () => {
                 ))}
 
                 {sidebarSectionState.meetingsOpen && (
-                  filteredSidebarItems
-                    .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
-                    .map(item => (
-                      <div key={`${item.id}-children`} className="mx-3">
-                        {item.children!.map(child => renderItem(child, 1))}
+                  <>
+                    <div className="mx-3 mt-1">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                        <input
+                          type="search"
+                          value={searchQuery}
+                          onChange={(event) => handleSearchChange(event.target.value)}
+                          className="h-8 w-full rounded-md border border-gray-200 bg-white pl-8 pr-2 text-sm text-gray-700 outline-none transition-colors placeholder:text-gray-400 focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+                          placeholder="Search meeting notes"
+                          aria-label="Search Meeting Notes"
+                        />
                       </div>
-                    ))
+                    </div>
+
+                    {filteredSidebarItems
+                      .filter(item => item.type === 'folder' && expandedFolders.has(item.id) && item.children)
+                      .map(item => (
+                        <div key={`${item.id}-children`} className="mx-3">
+                          {item.children!.length > 0 ? (
+                            item.children!.map(child => renderItem(child, 1))
+                          ) : (
+                            <div className="mx-1 mt-1 rounded-md border border-dashed border-gray-200 px-3 py-3 text-xs text-gray-500">
+                              {searchQuery.trim() ? 'No meeting notes match this search.' : 'Meeting notes will appear here.'}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </>
                 )}
               </div>
             )}

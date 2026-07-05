@@ -1,3 +1,5 @@
+import { formatSidebarDateTime } from '@/lib/sidebar-meetings';
+
 export type TranscribeLaterStatus = 'pending' | 'imported' | 'hidden';
 
 export interface TranscribeLaterIndexEntry {
@@ -91,11 +93,12 @@ export function formatTranscribeLaterSize(bytes: number): string {
 }
 
 export function getTranscribeLaterSubtitle(
-  recording: Pick<TranscribeLaterRecording, 'durationSeconds' | 'sizeBytes'>,
+  recording: Pick<TranscribeLaterRecording, 'durationSeconds' | 'sizeBytes' | 'modifiedAtMs'>,
 ): string {
   const parts = [
     formatTranscribeLaterDuration(recording.durationSeconds),
     formatTranscribeLaterSize(recording.sizeBytes),
+    formatSidebarDateTime(recording.modifiedAtMs),
   ].filter((part): part is string => Boolean(part));
 
   return parts.join(' • ');

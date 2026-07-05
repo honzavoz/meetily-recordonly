@@ -35,9 +35,9 @@ describe("transcribe later helpers", () => {
     expect(formatTranscribeLaterDuration(null)).toBeNull();
   });
 
-  test("shows duration and file size in the sidebar subtitle", () => {
-    expect(getTranscribeLaterSubtitle(recording({ durationSeconds: 754, sizeBytes: 4_407_706 }))).toBe("12:34 • 4.2 MB");
-    expect(getTranscribeLaterSubtitle(recording({ durationSeconds: null, sizeBytes: 154_112 }))).toBe("150.5 KB");
+  test("shows duration, file size, and date in the sidebar subtitle", () => {
+    expect(getTranscribeLaterSubtitle(recording({ durationSeconds: 754, sizeBytes: 4_407_706 }))).toContain("12:34 • 4.2 MB • ");
+    expect(getTranscribeLaterSubtitle(recording({ durationSeconds: null, sizeBytes: 154_112 }))).toContain("150.5 KB • ");
   });
 
   test("filters recordings by title and subtitle", () => {
