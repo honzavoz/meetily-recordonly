@@ -193,7 +193,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         with:
           projectPath: frontend
-          args: --target aarch64-apple-darwin ${{ steps.build-profile.outputs.args }}
+          args: --target aarch64-apple-darwin --bundles app ${{ steps.build-profile.outputs.args }}
 
       - name: Verify build artifacts
         run: |
