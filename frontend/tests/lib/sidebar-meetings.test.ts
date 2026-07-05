@@ -21,7 +21,7 @@ describe("sidebar meeting helpers", () => {
   test("formats meeting timestamps for compact sidebar display", () => {
     const timestamp = new Date(2026, 6, 5, 13, 42).getTime();
 
-    expect(formatSidebarDateTime(timestamp)).toBe("Jul 5, 13:42");
+    expect(formatSidebarDateTime(timestamp)).toBe("Jul 5, 2026, 13:42");
   });
 
   test("returns an empty subtitle when no meeting timestamp exists", () => {
@@ -37,6 +37,7 @@ describe("sidebar meeting helpers", () => {
     });
 
     expect(filterSidebarMeetings([clientKickoff, planning], "kick")).toEqual([clientKickoff]);
+    expect(filterSidebarMeetings([clientKickoff, planning], "2026")).toEqual([clientKickoff, planning]);
     expect(filterSidebarMeetings([clientKickoff, planning], "Nov 20")).toEqual([planning]);
     expect(filterSidebarMeetings([clientKickoff, planning], "   ")).toEqual([clientKickoff, planning]);
   });
