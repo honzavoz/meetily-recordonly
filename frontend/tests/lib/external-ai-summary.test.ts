@@ -57,6 +57,9 @@ describe("external AI summary helpers", () => {
     expect(prompt).toContain("| **Owner** | Task | Due | Reference Transcript Segment | Segment Timestamp |");
     expect(prompt).toContain("[01:05] We agreed that Jana will send the proposal tomorrow.");
     expect(prompt).toContain("Output exactly one fenced Markdown code block containing the completed report and nothing else.");
+    expect(prompt).toContain("Do not mention chunk numbers, prompt parts, segment numbers, or transcript-processing details in the final report.");
+    expect(prompt).toContain("Use natural timestamps or short source references instead of labels like \"Segment 1\" or \"Part 2\".");
+    expect(prompt).toContain("For unknown table values such as owner, due date, or reference, write \"Not specified\" rather than \"None noted in this section.\"");
   });
 
   test("splits long transcripts into local-AI-like chunk prompts plus a final template prompt", () => {
@@ -92,6 +95,8 @@ describe("external AI summary helpers", () => {
     expect(promptPackage.mergePrompt.text).toContain("Use the consecutive chunk summaries generated earlier in this chat as the source text.");
     expect(promptPackage.mergePrompt.text).toContain("Write the final meeting report in the dominant language of the source text.");
     expect(promptPackage.mergePrompt.text).toContain("Output exactly one fenced Markdown code block containing the completed report and nothing else.");
+    expect(promptPackage.mergePrompt.text).toContain("Do not mention chunk numbers, prompt parts, segment numbers, or transcript-processing details in the final report.");
+    expect(promptPackage.mergePrompt.text).toContain("Use natural timestamps or short source references instead of labels like \"Segment 1\" or \"Part 2\".");
     expect(promptPackage.mergePrompt.text).toContain("**Action Items**");
   });
 
