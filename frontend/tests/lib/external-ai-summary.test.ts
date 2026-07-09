@@ -49,19 +49,17 @@ describe("external AI summary helpers", () => {
     expect(promptPackage.parts).toHaveLength(1);
     const prompt = promptPackage.parts[0].text;
 
-    expect(prompt).toContain("Use the selected summary template exactly: Standard Meeting Notes");
-    expect(prompt).toContain("Meeting title: Client kickoff");
-    expect(prompt).toContain("Output language: Czech");
+    expect(prompt).toContain("Generate a final meeting report by filling in the provided Markdown template");
     expect(prompt).toContain("Client is price sensitive.");
-    expect(prompt).toContain("## Summary");
+    expect(prompt).toContain("**Summary**");
     expect(prompt).toContain("Provide a brief executive summary.");
     expect(prompt).toContain("| **Owner** | Task | Due | Reference Transcript Segment | Segment Timestamp |");
     expect(prompt).toContain("[01:05] We agreed that Jana will send the proposal tomorrow.");
-    expect(prompt).toContain("Return Markdown only.");
+    expect(prompt).toContain("Output **only** the completed Markdown report.");
     expect(prompt).not.toContain("```");
   });
 
-  test("splits long transcripts into numbered prompts plus a merge prompt", () => {
+  test("splits long transcripts into local-AI-like chunk prompts plus a final template prompt", () => {
     const longTranscripts = Array.from({ length: 8 }, (_, index) =>
       transcript({
         id: `t${index}`,
@@ -84,9 +82,15 @@ describe("external AI summary helpers", () => {
     expect(promptPackage.parts.length).toBeGreaterThan(1);
     expect(promptPackage.parts[0].title).toBe("Copy part 1");
     expect(promptPackage.mergePrompt.title).toBe("Copy final merge prompt");
-    expect(promptPackage.parts[0].text).toContain("PART 1 OF");
-    expect(promptPackage.mergePrompt.text).toContain("Combine the partial summaries");
-    expect(promptPackage.mergePrompt.text).toContain("## Action Items");
+    expect(promptPackage.parts[0].text).toContain("You are an expert meeting summarizer.");
+    expect(promptPackage.parts[0].text).toContain("Provide a concise but comprehensive summary of the following transcript chunk.");
+    expect(promptPackage.parts[0].text).toContain("<transcript_chunk>");
+    expect(promptPackage.parts[0].text).not.toContain("PART 1 OF");
+    expect(promptPackage.parts[0].text).not.toContain("Standard Meeting Notes");
+    expect(promptPackage.parts[0].text).not.toContain("## Action Items");
+    expect(promptPackage.mergePrompt.text).toContain("Generate a final meeting report by filling in the provided Markdown template");
+    expect(promptPackage.mergePrompt.text).toContain("Use the consecutive chunk summaries generated earlier in this chat as the source text.");
+    expect(promptPackage.mergePrompt.text).toContain("**Action Items**");
   });
 
   test("sanitizes pasted AI markdown before saving it as a summary payload", () => {
