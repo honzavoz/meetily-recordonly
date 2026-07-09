@@ -50,6 +50,7 @@ describe("external AI summary helpers", () => {
     const prompt = promptPackage.parts[0].text;
 
     expect(prompt).toContain("Generate a final meeting report by filling in the provided Markdown template");
+    expect(prompt).toContain("Write the final meeting report in Czech.");
     expect(prompt).toContain("Client is price sensitive.");
     expect(prompt).toContain("**Summary**");
     expect(prompt).toContain("Provide a brief executive summary.");
@@ -90,6 +91,7 @@ describe("external AI summary helpers", () => {
     expect(promptPackage.parts[0].text).not.toContain("## Action Items");
     expect(promptPackage.mergePrompt.text).toContain("Generate a final meeting report by filling in the provided Markdown template");
     expect(promptPackage.mergePrompt.text).toContain("Use the consecutive chunk summaries generated earlier in this chat as the source text.");
+    expect(promptPackage.mergePrompt.text).toContain("Write the final meeting report in the dominant language of the source text.");
     expect(promptPackage.mergePrompt.text).toContain("**Action Items**");
   });
 
