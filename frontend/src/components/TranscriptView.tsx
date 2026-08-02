@@ -6,6 +6,7 @@ import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { RecordingStatusBar } from './RecordingStatusBar';
 import { motion, AnimatePresence } from 'framer-motion';
+import { getRecordingTranscriptStatus } from '@/lib/recording-mode';
 
 interface TranscriptViewProps {
   transcripts: Transcript[];
@@ -14,6 +15,7 @@ interface TranscriptViewProps {
   isProcessing?: boolean; // Is processing/finalizing transcription (hides "Listening..." indicator)
   isStopping?: boolean; // Is recording being stopped (provides immediate UI feedback)
   enableStreaming?: boolean; // Enable streaming effect for live transcription UX
+  liveTranscriptionEnabled?: boolean; // Whether this recording produces live transcripts
 }
 
 interface SpeechDetectedEvent {
@@ -104,8 +106,9 @@ function cleanStopWords(text: string): string {
   return cleanedText;
 }
 
-export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false }) => {
+export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isRecording = false, isPaused = false, isProcessing = false, isStopping = false, enableStreaming = false, liveTranscriptionEnabled = true }) => {
   const [speechDetected, setSpeechDetected] = useState(false);
+  const recordingStatus = getRecordingTranscriptStatus(isPaused, liveTranscriptionEnabled);
 
   // Debug: Log the props to understand what's happening
   console.log('TranscriptView render:', {
@@ -335,7 +338,7 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
       })}
 
       {/* Show listening indicator when recording and has transcripts */}
-      {!isStopping && isRecording && !isPaused && !isProcessing && transcripts.length > 0 && (
+      {!isStopping && isRecording && !isPaused && !isProcessing && recordingStatus.showListeningIndicator && transcripts.length > 0 && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -360,12 +363,10 @@ export const TranscriptView: React.FC<TranscriptViewProps> = ({ transcripts, isR
                 <div className={`w-3 h-3 rounded-full ${isPaused ? 'bg-orange-500' : 'bg-blue-500 animate-pulse'}`}></div>
               </div>
               <p className="text-sm text-gray-600">
-                {isPaused ? 'Recording paused' : 'Listening for speech...'}
+                {recordingStatus.title}
               </p>
               <p className="text-xs mt-1 text-gray-400">
-                {isPaused
-                  ? 'Click resume to continue recording'
-                  : 'Speak to see live transcription'}
+                {recordingStatus.description}
               </p>
             </>
           ) : (
