@@ -56,6 +56,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate version consistency
+        run: ./scripts/check-version-consistency.sh
+
+      - name: Validate Apple signing credentials
+        if: contains(matrix.platform, 'macos') && inputs.sign-build
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: ./scripts/check-apple-signing-secrets.sh
+
       - name: Get version from tauri.conf.json
         id: get-version
         shell: bash
@@ -377,7 +391,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS platform code signing
           APPLE_ID: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_ID || '' }}
-          APPLE_ID_PASSWORD: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_ID_PASSWORD || '' }}
           APPLE_PASSWORD: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_TEAM_ID || '' }}
           APPLE_CERTIFICATE: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_CERTIFICATE || '' }}

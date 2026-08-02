@@ -12,10 +12,10 @@ on:
           - release
         default: release
       sign-build:
-        description: 'Sign the build'
+        description: 'Sign and notarize the build (requires Apple Developer secrets)'
         required: true
         type: boolean
-        default: true
+        default: false
       upload-artifacts:
         description: 'Upload build artifacts'
         required: true
@@ -44,6 +44,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate version consistency
+        run: ./scripts/check-version-consistency.sh
+
+      - name: Validate Apple signing credentials
+        if: ${{ inputs.sign-build }}
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: ./scripts/check-apple-signing-secrets.sh
+
       - name: Get version from tauri.conf.json
         id: get-version
         shell: bash
@@ -56,7 +70,7 @@ jobs:
         id: build-profile
         shell: bash
         run: |
-          if [[ "${{ github.event.inputs.build-type }}" == "debug" ]]; then
+          if [[ "${{ inputs.build-type }}" == "debug" ]]; then
             echo "profile=debug" >> "$GITHUB_OUTPUT"
             echo "args=--debug" >> "$GITHUB_OUTPUT"
             echo "Build profile: debug"
@@ -107,7 +121,7 @@ jobs:
           pnpm install
 
       - name: Import Apple Developer Certificate
-        if: ${{ github.event.inputs.sign-build == 'true' }}
+        if: ${{ inputs.sign-build }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -123,7 +137,7 @@ jobs:
           security find-identity -v -p codesigning build.keychain
 
       - name: Verify certificate
-        if: ${{ github.event.inputs.sign-build == 'true' }}
+        if: ${{ inputs.sign-build }}
         run: |
           CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application")
           CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
@@ -154,13 +168,12 @@ jobs:
           key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
 
       - name: Build Tauri app (with code signing)
-        if: ${{ github.event.inputs.sign-build == 'true' }}
+        if: ${{ inputs.sign-build }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # macOS code signing
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -179,7 +192,7 @@ jobs:
           args: --target aarch64-apple-darwin ${{ steps.build-profile.outputs.args }}
 
       - name: Build Tauri app (unsigned)
-        if: ${{ github.event.inputs.sign-build != 'true' }}
+        if: ${{ inputs.sign-build == false }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -201,7 +214,7 @@ jobs:
           find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle -type f
 
       - name: Verify code signing (App Bundle)
-        if: ${{ github.event.inputs.sign-build == 'true' }}
+        if: ${{ inputs.sign-build }}
         run: |
           APP_PATH=$(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos -name "*.app" | head -1)
           if [ -n "$APP_PATH" ]; then
@@ -220,7 +233,7 @@ jobs:
           fi
 
       - name: Verify code signing (DMG)
-        if: ${{ github.event.inputs.sign-build == 'true' }}
+        if: ${{ inputs.sign-build }}
         run: |
           DMG_PATH=$(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/dmg -name "*.dmg" | head -1)
           if [ -n "$DMG_PATH" ]; then
@@ -238,11 +251,24 @@ jobs:
             echo "No DMG found to verify"
           fi
 
+      - name: Verify unsigned app bundle
+        if: ${{ inputs.sign-build == false }}
+        shell: bash
+        run: |
+          APP_PATH=$(find target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos -name "*.app" -type d | head -1)
+          if [[ -z "$APP_PATH" ]]; then
+            echo "Unsigned build verification failed: no app bundle found" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict "$APP_PATH"
+          codesign -dv --verbose=4 "$APP_PATH" 2>&1 | grep -q "Signature=adhoc"
+          echo "Unsigned app bundle has a valid ad-hoc signature: $APP_PATH"
+
       - name: Upload artifacts
-        if: ${{ github.event.inputs.upload-artifacts == 'true' }}
+        if: ${{ inputs.upload-artifacts }}
         uses: actions/upload-artifact@v7
         with:
-          name: meetily-macos-aarch64-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
+          name: meetily-macos-aarch64-${{ inputs.sign-build && 'signed-notarized' || 'unsigned' }}-${{ steps.build-profile.outputs.profile }}-${{ steps.get-version.outputs.version }}
           path: |
             target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/dmg/*.dmg
             target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos/*.app
@@ -259,7 +285,7 @@ jobs:
           echo "| **Version** | ${{ steps.get-version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Build Profile** | ${{ steps.build-profile.outputs.profile }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Target** | aarch64-apple-darwin (Apple Silicon) |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Signed** | ${{ github.event.inputs.sign-build == 'true' && '✅ Yes' || '❌ No' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Distribution** | ${{ inputs.sign-build && 'Signed and notarized' || 'Unsigned (ad-hoc signature)' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📦 Build Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

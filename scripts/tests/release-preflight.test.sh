@@ -52,6 +52,7 @@ complete_output="$(
   APPLE_ID=developer@example.com \
   APPLE_PASSWORD=app-password \
   APPLE_TEAM_ID=TEAM123 \
+  KEYCHAIN_PASSWORD=keychain-password \
   "$signing_script"
 )"
 assert_contains "$complete_output" "Apple signing preflight passed"
@@ -64,6 +65,7 @@ missing_output="$(
   APPLE_ID=developer@example.com \
   APPLE_PASSWORD='' \
   APPLE_TEAM_ID=TEAM123 \
+  KEYCHAIN_PASSWORD='' \
   "$signing_script" 2>&1
 )"
 missing_status=$?
@@ -72,6 +74,7 @@ set -e
 assert_contains "$missing_output" "Apple signing credentials are incomplete"
 assert_contains "$missing_output" "APPLE_CERTIFICATE_PASSWORD"
 assert_contains "$missing_output" "APPLE_PASSWORD"
+assert_contains "$missing_output" "KEYCHAIN_PASSWORD"
 [[ "$missing_output" != *"certificate"* ]] || fail "secret value leaked into output"
 [[ "$missing_output" != *"app-password"* ]] || fail "secret value leaked into output"
 pass_count=$((pass_count + 1))
@@ -82,6 +85,19 @@ legacy_workflow_refs="$(
     "$repo_root/.github/workflows"/*.yml 2>/dev/null || true
 )"
 [[ -z "$legacy_workflow_refs" ]] || fail "deprecated Node 20 workflow actions remain:\n$legacy_workflow_refs"
+pass_count=$((pass_count + 1))
+
+macos_workflow="$repo_root/.github/workflows/build-macos.yml"
+release_workflow="$repo_root/.github/workflows/release.yml"
+grep -A5 'sign-build:' "$macos_workflow" | grep -q 'default: false' || fail "macOS sign-build must default to false"
+grep -q 'Validate Apple signing credentials' "$macos_workflow" || fail "macOS signing preflight step is missing"
+grep -q 'signed-notarized' "$macos_workflow" || fail "signed artifact label is missing"
+grep -q 'unsigned' "$macos_workflow" || fail "unsigned artifact label is missing"
+grep -qi 'version consistency' "$release_workflow" || fail "release version consistency check is missing"
+grep -Fq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_workflow" || fail "strict X.Y.Z release validation is missing"
+if grep -qE 'seq 1 100|LATEST_MINOR|NEXT_MINOR' "$release_workflow"; then
+  fail "legacy four-component release fallback remains"
+fi
 pass_count=$((pass_count + 1))
 
 echo "PASS: $pass_count release preflight scenarios"

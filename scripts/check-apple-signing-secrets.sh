@@ -7,6 +7,7 @@ required_variables=(
   APPLE_ID
   APPLE_PASSWORD
   APPLE_TEAM_ID
+  KEYCHAIN_PASSWORD
 )
 missing_variables=()
 

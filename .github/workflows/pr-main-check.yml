@@ -18,6 +18,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Validate version consistency
+        run: ./scripts/check-version-consistency.sh
+
       - name: Get version from tauri.conf.json
         id: get-version
         run: |

@@ -49,6 +49,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate version consistency
+        shell: bash
+        run: ./scripts/check-version-consistency.sh
+
       - name: Get version from tauri.conf.json
         id: get-version
         shell: bash

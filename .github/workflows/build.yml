@@ -57,6 +57,20 @@ jobs:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
 
+      - name: Validate version consistency
+        run: ./scripts/check-version-consistency.sh
+
+      - name: Validate Apple signing credentials
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: ./scripts/check-apple-signing-secrets.sh
+
       - name: Get version from tauri.conf.json.
         id: get-version
         shell: bash
@@ -572,7 +586,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ inputs.sign-binaries && secrets.APPLE_ID || '' }}
-          APPLE_ID_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_ID_PASSWORD || '' }}
           APPLE_PASSWORD: ${{ inputs.sign-binaries && secrets.APPLE_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ inputs.sign-binaries && secrets.APPLE_TEAM_ID || '' }}
           APPLE_CERTIFICATE: ${{ inputs.sign-binaries && secrets.APPLE_CERTIFICATE || '' }}
@@ -592,6 +605,19 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
+
+      - name: Verify signed and notarized macOS app
+        if: contains(inputs.platform, 'macos') && inputs.sign-binaries
+        shell: bash
+        run: |
+          APP_PATH=$(find target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/macos -name "*.app" -type d | head -1)
+          if [[ -z "$APP_PATH" ]]; then
+            echo "Signed build verification failed: no app bundle found" >&2
+            exit 1
+          fi
+          codesign --verify --deep --strict "$APP_PATH"
+          spctl --assess --type execute --verbose=4 "$APP_PATH"
+          echo "Signed and notarized app passed Gatekeeper verification: $APP_PATH"
 
       - name: Upload artifacts (macOS)
         if: inputs.upload-artifacts && contains(inputs.platform, 'macos')
