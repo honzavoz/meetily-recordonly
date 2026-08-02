@@ -36,17 +36,20 @@ export function useRecordingStart(
   const { clearTranscripts, setMeetingTitle } = useTranscripts();
   const { setIsMeetingActive } = useSidebar();
   const { selectedDevices } = useConfig();
-  const { setStatus } = useRecordingState();
+  const { setStatus, setLiveTranscriptionEnabled } = useRecordingState();
 
   const loadLiveTranscriptionEnabled = useCallback(async (): Promise<boolean> => {
     try {
       const preferences = await invoke('get_recording_preferences');
-      return getLiveTranscriptionEnabled(preferences as any);
+      const enabled = getLiveTranscriptionEnabled(preferences as any);
+      setLiveTranscriptionEnabled(enabled);
+      return enabled;
     } catch (error) {
       console.error('Failed to load recording mode preferences:', error);
+      setLiveTranscriptionEnabled(true);
       return true;
     }
-  }, []);
+  }, [setLiveTranscriptionEnabled]);
 
   // Generate meeting title with timestamp
   const generateMeetingTitle = useCallback(() => {

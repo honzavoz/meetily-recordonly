@@ -30,6 +30,7 @@ interface RecordingState {
   isActive: boolean;              // Is actively recording (recording && !paused)
   recordingDuration: number | null;  // Total duration including pauses
   activeDuration: number | null;     // Active recording time (excluding pauses)
+  liveTranscriptionEnabled: boolean; // Mode selected for the active recording
 
   // NEW: Lifecycle status
   status: RecordingStatus;
@@ -39,6 +40,7 @@ interface RecordingState {
 interface RecordingStateContextType extends RecordingState {
   // NEW: Setters for status management
   setStatus: (status: RecordingStatus, message?: string) => void;
+  setLiveTranscriptionEnabled: (enabled: boolean) => void;
 
   // Computed helpers (derived from status)
   isStopping: boolean;
@@ -63,6 +65,7 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
     isActive: false,
     recordingDuration: null,
     activeDuration: null,
+    liveTranscriptionEnabled: true,
     status: RecordingStatus.IDLE,  // NEW: Initialize with IDLE status
     statusMessage: undefined,       // NEW: No message initially
   });
@@ -79,6 +82,10 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
       statusMessage: message,
     }));
   }, [state.status, state.isRecording, state.isPaused]);
+
+  const setLiveTranscriptionEnabled = useCallback((enabled: boolean) => {
+    setState(prev => ({ ...prev, liveTranscriptionEnabled: enabled }));
+  }, []);
 
   /**
    * Sync recording state with backend
@@ -229,10 +236,11 @@ export function RecordingStateProvider({ children }: { children: React.ReactNode
   const contextValue = useMemo(() => ({
     ...state,
     setStatus,
+    setLiveTranscriptionEnabled,
     isStopping: state.status === RecordingStatus.STOPPING,
     isProcessing: state.status === RecordingStatus.PROCESSING_TRANSCRIPTS,
     isSaving: state.status === RecordingStatus.SAVING,
-  }), [state, setStatus]);
+  }), [state, setStatus, setLiveTranscriptionEnabled]);
 
   return (
     <RecordingStateContext.Provider value={contextValue}>
