@@ -17,6 +17,7 @@ import { useRecordingState } from '@/contexts/RecordingStateContext';
 import { useImportDialog } from '@/contexts/ImportDialogContext';
 import { useConfig } from '@/contexts/ConfigContext';
 import { useTranscribeLaterRecordings } from '@/hooks/useTranscribeLaterRecordings';
+import { useAppVersion } from '@/hooks/useAppVersion';
 import {
   getDefaultSidebarSectionState,
   getNextSidebarSectionState,
@@ -82,6 +83,7 @@ const Sidebar: React.FC = () => {
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
   const transcribeLater = useTranscribeLaterRecordings();
+  const appVersion = useAppVersion();
   const hasTranscribeLaterSection = betaFeatures.importAndRetranscribe;
   const hasTranscribeLaterRecordings = transcribeLater.recordings.length > 0;
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['meetings']));
@@ -1096,7 +1098,7 @@ const Sidebar: React.FC = () => {
             </button>
             <Info isCollapsed={isCollapsed} />
             <div className="w-full flex items-center justify-center px-3 py-1 text-xs text-gray-400">
-              v0.4.0
+              v{appVersion}
             </div>
           </div>
         )}

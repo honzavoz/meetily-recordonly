@@ -7,6 +7,7 @@ import { load } from '@tauri-apps/plugin-store';
 import { invoke } from '@tauri-apps/api/core';
 import { Analytics } from '@/lib/analytics';
 import AnalyticsDataModal from './AnalyticsDataModal';
+import { PACKAGED_APP_VERSION } from '@/hooks/useAppVersion';
 
 const ANALYTICS_DEFAULT_OFF_MIGRATION_KEY = 'analyticsDefaultOffMigrationV1';
 
@@ -94,7 +95,7 @@ export default function AnalyticsConsentSwitch() {
 
         // Identify user with enhanced properties immediately after init
         await Analytics.identify(userId, {
-          app_version: '0.4.0',
+          app_version: PACKAGED_APP_VERSION,
           platform: 'tauri',
           first_seen: new Date().toISOString(),
           os: navigator.platform,
