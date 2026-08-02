@@ -76,4 +76,12 @@ assert_contains "$missing_output" "APPLE_PASSWORD"
 [[ "$missing_output" != *"app-password"* ]] || fail "secret value leaked into output"
 pass_count=$((pass_count + 1))
 
+legacy_workflow_refs="$(
+  grep -R -n -E \
+    'actions/(checkout|setup-node|upload-artifact)@v4|actions/cache@v4|pnpm/action-setup@v4|node-version:[[:space:]]*['"'"']?20['"'"']?' \
+    "$repo_root/.github/workflows"/*.yml 2>/dev/null || true
+)"
+[[ -z "$legacy_workflow_refs" ]] || fail "deprecated Node 20 workflow actions remain:\n$legacy_workflow_refs"
+pass_count=$((pass_count + 1))
+
 echo "PASS: $pass_count release preflight scenarios"
