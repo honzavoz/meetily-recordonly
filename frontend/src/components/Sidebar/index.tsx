@@ -50,6 +50,9 @@ import { MessageToast } from '../MessageToast';
 import Logo from '../Logo';
 import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
+import { ProjectPicker } from '@/components/Projects/ProjectPicker';
+import { ProjectSidebarNavigation } from '@/components/Projects/ProjectSidebarNavigation';
+import type { Project } from '@/types/projects';
 
 interface SidebarItem {
   id: string;
@@ -58,6 +61,7 @@ interface SidebarItem {
   createdAt?: string | null;
   updatedAt?: string | null;
   children?: SidebarItem[];
+  projects?: Project[];
 }
 
 const Sidebar: React.FC = () => {
@@ -75,7 +79,17 @@ const Sidebar: React.FC = () => {
     isSearching,
     meetings,
     setMeetings,
-    serverAddress
+    serverAddress,
+    projects,
+    activeProjectView,
+    setActiveProjectView,
+    isProjectsLoading,
+    projectsError,
+    refetchProjects,
+    assignProject,
+    createAndAssignProject,
+    renameProject,
+    deleteProject,
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
@@ -154,6 +168,11 @@ const Sidebar: React.FC = () => {
   }>({ isOpen: false, recording: null });
   const [transcribeEditingTitle, setTranscribeEditingTitle] = useState<string>('');
   const [renamingTranscribeRecordingId, setRenamingTranscribeRecordingId] = useState<string | null>(null);
+  const [projectDialog, setProjectDialog] = useState<{
+    mode: 'rename' | 'delete' | null;
+    project: Project | null;
+  }>({ mode: null, project: null });
+  const [projectName, setProjectName] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -540,6 +559,31 @@ const Sidebar: React.FC = () => {
     setEditingTitle('');
   };
 
+  const openProjectRename = (project: Project) => {
+    setProjectDialog({ mode: 'rename', project });
+    setProjectName(project.name);
+  };
+
+  const closeProjectDialog = () => {
+    setProjectDialog({ mode: null, project: null });
+    setProjectName('');
+  };
+
+  const confirmProjectDialog = async () => {
+    if (!projectDialog.project || !projectDialog.mode) return;
+    try {
+      if (projectDialog.mode === 'rename') {
+        await renameProject(projectDialog.project.id, projectName);
+      } else {
+        await deleteProject(projectDialog.project.id);
+        toast.success('Project deleted', { description: 'Meetings were left untouched.' });
+      }
+      closeProjectDialog();
+    } catch {
+      // Provider restores optimistic state and shows the actionable error.
+    }
+  };
+
   const toggleFolder = (folderId: string) => {
     // Normal toggle behavior for all folders
     const newExpanded = new Set(expandedFolders);
@@ -717,7 +761,7 @@ const Sidebar: React.FC = () => {
             if (item.type === 'folder') {
               toggleFolder(item.id);
             } else {
-              setCurrentMeeting({ id: item.id, title: item.title });
+              setCurrentMeeting({ id: item.id, title: item.title, projects: item.projects ?? [] });
               const basePath = item.id.startsWith('intro-call') ? '/' :
                 item.id.includes('-') ? `/meeting-details?id=${item.id}` : `/notes/${item.id}`;
               router.push(basePath);
@@ -765,6 +809,16 @@ const Sidebar: React.FC = () => {
                 </div>
                 {isMeetingItem && (
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <ProjectPicker
+                        compact
+                        label="Project"
+                        projects={projects}
+                        assignedProjectIds={(item.projects ?? []).map((project) => project.id)}
+                        onSelect={(project) => assignProject(item.id, project)}
+                        onCreate={(name) => createAndAssignProject(item.id, name)}
+                      />
+                    </div>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1024,6 +1078,19 @@ const Sidebar: React.FC = () => {
                 {sidebarSectionState.meetingsOpen && (
                   <>
                     <div className="mx-3 mt-1">
+                      <ProjectSidebarNavigation
+                        meetings={meetings.map((meeting) => ({ ...meeting, projects: meeting.projects ?? [] }))}
+                        projects={projects}
+                        activeView={activeProjectView}
+                        loading={isProjectsLoading}
+                        error={projectsError}
+                        onSelect={setActiveProjectView}
+                        onRetry={refetchProjects}
+                        onRename={openProjectRename}
+                        onDelete={(project) => setProjectDialog({ mode: 'delete', project })}
+                      />
+                    </div>
+                    <div className="mx-3 mt-1">
                       <div className="relative">
                         <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-gray-400" />
                         <input
@@ -1221,6 +1288,47 @@ const Sidebar: React.FC = () => {
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
             >
               Save
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={projectDialog.mode !== null} onOpenChange={(open) => {
+        if (!open) closeProjectDialog();
+      }}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogTitle>
+            {projectDialog.mode === 'rename' ? 'Rename Project' : 'Delete Project'}
+          </DialogTitle>
+          {projectDialog.mode === 'rename' ? (
+            <div className="py-2">
+              <label htmlFor="project-name" className="mb-2 block text-sm font-medium text-gray-700">Project name</label>
+              <input
+                id="project-name"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && projectName.trim()) confirmProjectDialog();
+                }}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                autoFocus
+              />
+            </div>
+          ) : (
+            <p className="py-2 text-sm text-gray-600">
+              Delete “{projectDialog.project?.name}”? Meetings and their notes remain intact and move to Unassigned if this was their only project.
+            </p>
+          )}
+          <DialogFooter>
+            <button onClick={closeProjectDialog} className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200">Cancel</button>
+            <button
+              onClick={confirmProjectDialog}
+              disabled={projectDialog.mode === 'rename' && !projectName.trim()}
+              className={projectDialog.mode === 'delete'
+                ? 'rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700'
+                : 'rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50'}
+            >
+              {projectDialog.mode === 'delete' ? 'Delete Project' : 'Save'}
             </button>
           </DialogFooter>
         </DialogContent>

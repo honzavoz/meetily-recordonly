@@ -62,7 +62,15 @@ export default function PageContent({
   const openModelSettingsRef = useRef<(() => void) | null>(null);
 
   // Sidebar context
-  const { serverAddress } = useSidebar();
+  const {
+    serverAddress,
+    meetings,
+    projects,
+    assignProject,
+    removeProject,
+    createAndAssignProject,
+  } = useSidebar();
+  const meetingProjects = meetings.find((item) => item.id === meeting.id)?.projects ?? [];
 
   // Get model config from ConfigContext
   const { modelConfig, setModelConfig } = useConfig();
@@ -226,6 +234,11 @@ export default function PageContent({
           onTemplateSelect={templates.handleTemplateSelection}
           isModelConfigLoading={false}
           onOpenModelSettings={handleRegisterModalOpen}
+          projects={meetingProjects}
+          availableProjects={projects}
+          onAssignProject={(project) => assignProject(meeting.id, project)}
+          onCreateProject={(name) => createAndAssignProject(meeting.id, name)}
+          onRemoveProject={(project) => removeProject(meeting.id, project.id)}
         />
       </div>
     </motion.div>

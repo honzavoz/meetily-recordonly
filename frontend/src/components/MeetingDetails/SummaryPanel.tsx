@@ -32,6 +32,9 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { ProjectChips } from '@/components/Projects/ProjectChips';
+import { ProjectPicker } from '@/components/Projects/ProjectPicker';
+import type { Project } from '@/types/projects';
 
 interface SummaryPanelProps {
   meeting: {
@@ -71,6 +74,11 @@ interface SummaryPanelProps {
   onTemplateSelect: (templateId: string, templateName: string) => void;
   isModelConfigLoading?: boolean;
   onOpenModelSettings?: (openFn: () => void) => void;
+  projects: Project[];
+  availableProjects: Project[];
+  onAssignProject: (project: Project) => Promise<void>;
+  onCreateProject: (name: string) => Promise<Project>;
+  onRemoveProject: (project: Project) => Promise<void>;
 }
 
 export function SummaryPanel({
@@ -106,7 +114,12 @@ export function SummaryPanel({
   selectedTemplate,
   onTemplateSelect,
   isModelConfigLoading = false,
-  onOpenModelSettings
+  onOpenModelSettings,
+  projects,
+  availableProjects,
+  onAssignProject,
+  onCreateProject,
+  onRemoveProject,
 }: SummaryPanelProps) {
   const [summaryLang, setSummaryLang] = useState<string | null>(null);
   const [summaryLangStorage, setSummaryLangStorage] = useState<SummaryLanguageStorage>('metadata');
@@ -280,13 +293,24 @@ export function SummaryPanel({
     <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
       {/* Title area */}
       <div className="p-4 border-b border-gray-200">
-        {/* <EditableTitle
-          title={meetingTitle}
-          isEditing={isEditingTitle}
-          onStartEditing={onStartEditTitle}
-          onFinishEditing={onFinishEditTitle}
-          onChange={onTitleChange}
-        /> */}
+        <div className="mb-3 flex flex-col gap-2">
+          <EditableTitle
+            title={meetingTitle}
+            isEditing={isEditingTitle}
+            onStartEditing={onStartEditTitle}
+            onFinishEditing={onFinishEditTitle}
+            onChange={onTitleChange}
+          />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ProjectChips projects={projects} onRemove={onRemoveProject} />
+            <ProjectPicker
+              projects={availableProjects}
+              assignedProjectIds={projects.map((project) => project.id)}
+              onSelect={onAssignProject}
+              onCreate={onCreateProject}
+            />
+          </div>
+        </div>
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (

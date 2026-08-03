@@ -4,6 +4,7 @@ export interface SidebarMeetingListItem {
   type: 'file';
   createdAt?: string | null;
   updatedAt?: string | null;
+  projects?: Array<{ name: string }>;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -33,7 +34,7 @@ export function getSidebarMeetingSubtitle(
   return formatSidebarDateTime(meeting.createdAt);
 }
 
-export function filterSidebarMeetings<T extends Pick<SidebarMeetingListItem, 'title' | 'createdAt'>>(
+export function filterSidebarMeetings<T extends Pick<SidebarMeetingListItem, 'title' | 'createdAt' | 'projects'>>(
   meetings: T[],
   query: string,
 ): T[] {
@@ -46,6 +47,7 @@ export function filterSidebarMeetings<T extends Pick<SidebarMeetingListItem, 'ti
     const searchableText = [
       meeting.title,
       getSidebarMeetingSubtitle(meeting),
+      ...(meeting.projects ?? []).map((project) => project.name),
     ].join(' ').toLowerCase();
 
     return searchableText.includes(normalizedQuery);

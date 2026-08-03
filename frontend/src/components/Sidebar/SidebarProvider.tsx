@@ -5,6 +5,10 @@ import { usePathname, useRouter } from 'next/navigation';
 import Analytics from '@/lib/analytics';
 import { invoke } from '@tauri-apps/api/core';
 import { useRecordingState } from '@/contexts/RecordingStateContext';
+import { toast } from 'sonner';
+import { projectService } from '@/services/projectService';
+import type { MeetingProjectView, Project } from '@/types/projects';
+import { filterMeetingsForProjectView } from '@/lib/meeting-projects';
 
 
 interface SidebarItem {
@@ -14,6 +18,7 @@ interface SidebarItem {
   createdAt?: string | null;
   updatedAt?: string | null;
   children?: SidebarItem[];
+  projects?: Project[];
 }
 
 export interface CurrentMeeting {
@@ -21,6 +26,8 @@ export interface CurrentMeeting {
   title: string;
   createdAt?: string | null;
   updatedAt?: string | null;
+  folderPath?: string | null;
+  projects?: Project[];
 }
 
 // Search result type for transcript search
@@ -55,6 +62,17 @@ interface SidebarContextType {
   stopSummaryPolling: (meetingId: string) => void;
   // Refetch meetings from backend
   refetchMeetings: () => Promise<void>;
+  projects: Project[];
+  activeProjectView: MeetingProjectView;
+  setActiveProjectView: (view: MeetingProjectView) => void;
+  isProjectsLoading: boolean;
+  projectsError: string | null;
+  refetchProjects: () => Promise<void>;
+  assignProject: (meetingId: string, project: Project) => Promise<void>;
+  removeProject: (meetingId: string, projectId: string) => Promise<void>;
+  createAndAssignProject: (meetingId: string, name: string) => Promise<Project>;
+  renameProject: (projectId: string, name: string) => Promise<void>;
+  deleteProject: (projectId: string) => Promise<void>;
 
 }
 
@@ -79,6 +97,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
   const [activeSummaryPolls, setActiveSummaryPolls] = useState<Map<string, NodeJS.Timeout>>(new Map());
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectView, setActiveProjectView] = useState<MeetingProjectView>({ type: 'all' });
+  const [isProjectsLoading, setIsProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   // Use recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -90,21 +112,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const fetchMeetings = React.useCallback(async () => {
     if (serverAddress) {
       try {
-        const meetings = await invoke('api_get_meetings') as Array<{
-          id: string;
-          title: string;
-          created_at?: string | null;
-          updated_at?: string | null;
-          createdAt?: string | null;
-          updatedAt?: string | null;
-        }>;
-        const transformedMeetings = meetings.map((meeting: any) => ({
-          id: meeting.id,
-          title: meeting.title,
-          createdAt: meeting.created_at ?? meeting.createdAt ?? null,
-          updatedAt: meeting.updated_at ?? meeting.updatedAt ?? null,
-        }));
-        setMeetings(transformedMeetings);
+        setMeetings(await projectService.listMeetings({ type: 'all' }));
         Analytics.trackBackendConnection(true);
       } catch (error) {
         console.error('Error fetching meetings:', error);
@@ -114,9 +122,30 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, [serverAddress]);
 
+  const fetchProjects = React.useCallback(async () => {
+    if (!serverAddress) return;
+    setIsProjectsLoading(true);
+    try {
+      setProjects(await projectService.listProjects());
+      setProjectsError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setProjectsError(message);
+      toast.error('Projects could not be loaded', {
+        description: 'All Meetings is still available. Try again from the project list.',
+      });
+    } finally {
+      setIsProjectsLoading(false);
+    }
+  }, [serverAddress]);
+
   useEffect(() => {
     fetchMeetings();
   }, [serverAddress, fetchMeetings]);
+
+  useEffect(() => {
+    fetchProjects();
+  }, [serverAddress, fetchProjects]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -126,17 +155,23 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     fetchSettings();
   }, []);
 
+  const visibleMeetings = filterMeetingsForProjectView(
+    meetings.map((meeting) => ({ ...meeting, projects: meeting.projects ?? [] })),
+    activeProjectView,
+  );
+
   const baseItems: SidebarItem[] = [
     {
       id: 'meetings',
       title: 'Meeting Notes',
       type: 'folder' as const,
       children: [
-        ...meetings.map(meeting => ({
+        ...visibleMeetings.map(meeting => ({
           id: meeting.id,
           title: meeting.title,
           createdAt: meeting.createdAt ?? null,
           updatedAt: meeting.updatedAt ?? null,
+          projects: meeting.projects ?? [],
           type: 'file' as const,
         }))
       ]
@@ -159,7 +194,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   // Update sidebar items when meetings change
   useEffect(() => {
     setSidebarItems(baseItems);
-  }, [meetings]);
+  }, [meetings, activeProjectView]);
 
   // Function to handle recording toggle from sidebar
   const handleRecordingToggle = () => {
@@ -298,6 +333,115 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, [activeSummaryPolls]);
 
+  const assignProject = React.useCallback(async (meetingId: string, project: Project) => {
+    const previousMeetings = meetings;
+    const previousProjects = projects;
+    const alreadyAssigned = meetings.find((meeting) => meeting.id === meetingId)
+      ?.projects?.some((assigned) => assigned.id === project.id) ?? false;
+    if (alreadyAssigned) return;
+
+    setMeetings((current) => current.map((meeting) => meeting.id === meetingId
+      ? { ...meeting, projects: [...(meeting.projects ?? []), project] }
+      : meeting));
+    setProjects((current) => current.map((item) => item.id === project.id
+      ? { ...item, meetingCount: (item.meetingCount ?? 0) + 1 }
+      : item));
+    try {
+      await projectService.assignMeetingProject(meetingId, project.id);
+    } catch (error) {
+      setMeetings(previousMeetings);
+      setProjects(previousProjects);
+      toast.error('Project assignment failed', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }, [meetings, projects]);
+
+  const removeProject = React.useCallback(async (meetingId: string, projectId: string) => {
+    const previousMeetings = meetings;
+    const previousProjects = projects;
+    const wasAssigned = meetings.find((meeting) => meeting.id === meetingId)
+      ?.projects?.some((assigned) => assigned.id === projectId) ?? false;
+    if (!wasAssigned) return;
+
+    setMeetings((current) => current.map((meeting) => meeting.id === meetingId
+      ? { ...meeting, projects: (meeting.projects ?? []).filter((project) => project.id !== projectId) }
+      : meeting));
+    setProjects((current) => current.map((project) => project.id === projectId
+      ? { ...project, meetingCount: Math.max(0, (project.meetingCount ?? 1) - 1) }
+      : project));
+    try {
+      await projectService.removeMeetingProject(meetingId, projectId);
+    } catch (error) {
+      setMeetings(previousMeetings);
+      setProjects(previousProjects);
+      toast.error('Project removal failed', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }, [meetings, projects]);
+
+  const createAndAssignProject = React.useCallback(async (meetingId: string, name: string) => {
+    const project = await projectService.createProject(name);
+    setProjects((current) => current.some((item) => item.id === project.id)
+      ? current
+      : [...current, { ...project, meetingCount: 0 }].sort((a, b) => a.name.localeCompare(b.name)));
+    await assignProject(meetingId, project);
+    return project;
+  }, [assignProject]);
+
+  const renameProject = React.useCallback(async (projectId: string, name: string) => {
+    const previousProjects = projects;
+    const previousMeetings = meetings;
+    setProjects((current) => current.map((project) => project.id === projectId ? { ...project, name } : project));
+    setMeetings((current) => current.map((meeting) => ({
+      ...meeting,
+      projects: (meeting.projects ?? []).map((project) => project.id === projectId ? { ...project, name } : project),
+    })));
+    try {
+      const renamed = await projectService.renameProject(projectId, name);
+      setProjects((current) => current.map((project) => project.id === projectId
+        ? { ...renamed, meetingCount: project.meetingCount }
+        : project));
+      setMeetings((current) => current.map((meeting) => ({
+        ...meeting,
+        projects: (meeting.projects ?? []).map((project) => project.id === projectId
+          ? { ...renamed, meetingCount: project.meetingCount }
+          : project),
+      })));
+    } catch (error) {
+      setProjects(previousProjects);
+      setMeetings(previousMeetings);
+      toast.error('Project rename failed', { description: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }, [meetings, projects]);
+
+  const deleteProject = React.useCallback(async (projectId: string) => {
+    const previousProjects = projects;
+    const previousMeetings = meetings;
+    const previousActiveView = activeProjectView;
+    setProjects((current) => current.filter((project) => project.id !== projectId));
+    setMeetings((current) => current.map((meeting) => ({
+      ...meeting,
+      projects: (meeting.projects ?? []).filter((project) => project.id !== projectId),
+    })));
+    if (activeProjectView.type === 'project' && activeProjectView.projectId === projectId) {
+      setActiveProjectView({ type: 'all' });
+    }
+    try {
+      await projectService.deleteProject(projectId);
+    } catch (error) {
+      setProjects(previousProjects);
+      setMeetings(previousMeetings);
+      setActiveProjectView(previousActiveView);
+      toast.error('Project deletion failed', { description: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  }, [activeProjectView, meetings, projects]);
+
   // Cleanup all polling intervals on unmount
   useEffect(() => {
     return () => {
@@ -331,6 +475,17 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       startSummaryPolling,
       stopSummaryPolling,
       refetchMeetings: fetchMeetings,
+      projects,
+      activeProjectView,
+      setActiveProjectView,
+      isProjectsLoading,
+      projectsError,
+      refetchProjects: fetchProjects,
+      assignProject,
+      removeProject,
+      createAndAssignProject,
+      renameProject,
+      deleteProject,
 
     }}>
       {children}
