@@ -11,7 +11,36 @@ pub struct MeetingModel {
     pub folder_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize, PartialEq)]
+pub struct ProjectModel {
+    pub id: String,
+    pub name: String,
+    pub normalized_name: String,
+    pub created_at: DateTimeUtc,
+    pub updated_at: DateTimeUtc,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize, Deserialize)]
+pub struct ProjectWithCount {
+    pub id: String,
+    pub name: String,
+    pub normalized_name: String,
+    pub created_at: DateTimeUtc,
+    pub updated_at: DateTimeUtc,
+    pub meeting_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeetingWithProjects {
+    pub id: String,
+    pub title: String,
+    pub created_at: DateTimeUtc,
+    pub updated_at: DateTimeUtc,
+    pub folder_path: Option<String>,
+    pub projects: Vec<ProjectModel>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(transparent)]
 pub struct DateTimeUtc(pub DateTime<Utc>);
 

@@ -6,9 +6,11 @@ use tauri_plugin_store::StoreExt;
 
 use crate::{
     database::{
-        models::MeetingModel,
+        models::{MeetingModel, MeetingWithProjects, ProjectModel, ProjectWithCount},
         repositories::{
-            meeting::MeetingsRepository, setting::SettingsRepository,
+            meeting::MeetingsRepository,
+            project::{MeetingProjectFilter, ProjectRepository},
+            setting::SettingsRepository,
             transcript::TranscriptsRepository,
         },
     },
@@ -354,6 +356,140 @@ pub async fn api_get_meetings<R: Runtime>(
             Err(e.to_string())
         }
     }
+}
+
+#[tauri::command]
+pub async fn api_list_projects<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<ProjectWithCount>, String> {
+    ProjectRepository::list(state.db_manager.pool())
+        .await
+        .map_err(|error| format!("Failed to list projects: {}", error))
+}
+
+#[tauri::command]
+pub async fn api_search_projects<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    query: String,
+) -> Result<Vec<ProjectWithCount>, String> {
+    ProjectRepository::search(state.db_manager.pool(), &query)
+        .await
+        .map_err(|error| format!("Failed to search projects: {}", error))
+}
+
+#[tauri::command]
+pub async fn api_create_project<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    name: String,
+) -> Result<ProjectModel, String> {
+    ProjectRepository::create_or_get(state.db_manager.pool(), &name)
+        .await
+        .map_err(|error| format!("Failed to create project: {}", error))
+}
+
+#[tauri::command]
+pub async fn api_rename_project<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+    name: String,
+) -> Result<ProjectModel, String> {
+    ProjectRepository::rename(state.db_manager.pool(), &project_id, &name)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => format!("Project not found: {}", project_id),
+            other => format!("Failed to rename project: {}", other),
+        })
+}
+
+#[tauri::command]
+pub async fn api_delete_project<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+) -> Result<(), String> {
+    ProjectRepository::delete(state.db_manager.pool(), &project_id)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => format!("Project not found: {}", project_id),
+            other => format!("Failed to delete project: {}", other),
+        })
+}
+
+#[tauri::command]
+pub async fn api_get_meeting_projects<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+) -> Result<Vec<ProjectModel>, String> {
+    ProjectRepository::list_for_meeting(state.db_manager.pool(), &meeting_id)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => format!("Meeting not found: {}", meeting_id),
+            other => format!("Failed to list meeting projects: {}", other),
+        })
+}
+
+#[tauri::command]
+pub async fn api_assign_meeting_project<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    project_id: String,
+) -> Result<(), String> {
+    ProjectRepository::assign(state.db_manager.pool(), &meeting_id, &project_id)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => {
+                format!("Meeting or project not found: {} / {}", meeting_id, project_id)
+            }
+            other => format!("Failed to assign project: {}", other),
+        })
+}
+
+#[tauri::command]
+pub async fn api_remove_meeting_project<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    meeting_id: String,
+    project_id: String,
+) -> Result<(), String> {
+    ProjectRepository::remove(state.db_manager.pool(), &meeting_id, &project_id)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => {
+                format!("Meeting or project not found: {} / {}", meeting_id, project_id)
+            }
+            other => format!("Failed to remove project: {}", other),
+        })
+}
+
+#[tauri::command]
+pub async fn api_list_project_meetings<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    view: String,
+    project_id: Option<String>,
+) -> Result<Vec<MeetingWithProjects>, String> {
+    let filter = match view.as_str() {
+        "all" => MeetingProjectFilter::All,
+        "unassigned" => MeetingProjectFilter::Unassigned,
+        "project" => MeetingProjectFilter::Project(
+            project_id
+                .as_deref()
+                .ok_or_else(|| "projectId is required for project view".to_string())?,
+        ),
+        _ => return Err(format!("Unknown meeting project view: {}", view)),
+    };
+    ProjectRepository::list_meetings(state.db_manager.pool(), filter)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => "Project not found".to_string(),
+            other => format!("Failed to list meetings: {}", other),
+        })
 }
 
 #[tauri::command]
