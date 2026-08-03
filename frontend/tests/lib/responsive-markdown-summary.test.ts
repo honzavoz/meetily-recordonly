@@ -11,6 +11,10 @@ const updaterSource = readFileSync(
   new URL('../../src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx', import.meta.url),
   'utf8',
 );
+const overflowActionsSource = readFileSync(
+  new URL('../../src/components/MeetingDetails/SummaryActionsOverflow.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('responsive markdown summary layout contract', () => {
   test('keeps the summary content as a bounded vertical scroll area', () => {
@@ -57,6 +61,11 @@ describe('responsive markdown summary layout contract', () => {
   test('keeps updater controls within the available toolbar width', () => {
     expect(updaterSource).toContain('max-w-full');
     expect(updaterSource).toContain('shrink-0');
+  });
+
+  test('keeps compact Save and More actions on the same small button height', () => {
+    expect(overflowActionsSource).toContain('size="sm"');
+    expect(overflowActionsSource).not.toContain('min-h-11');
   });
 
   test('gives both External AI dialogs their own scrolling body', () => {

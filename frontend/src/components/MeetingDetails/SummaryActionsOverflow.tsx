@@ -65,7 +65,7 @@ export function SummaryActionsOverflow({
           type="button"
           variant="outline"
           size="sm"
-          className="min-h-11 shrink-0 cursor-pointer gap-2"
+          className="shrink-0 cursor-pointer gap-2"
           aria-label="More summary actions"
           title="More summary actions"
         >
