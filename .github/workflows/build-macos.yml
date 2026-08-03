@@ -133,9 +133,6 @@ jobs:
         working-directory: frontend
         run: pnpm exec bun test
 
-      - name: Test Rust workspace
-        run: cargo test --workspace --locked
-
       - name: Import Apple Developer Certificate
         if: ${{ inputs.sign-build }}
         env:
@@ -176,6 +173,9 @@ jobs:
 
           echo "Copied llama-helper to frontend/src-tauri/binaries/"
           ls -la frontend/src-tauri/binaries/
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --locked
 
       - name: Cache FFmpeg binary
         uses: actions/cache@v6
