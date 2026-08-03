@@ -9,13 +9,12 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Runtime};
 
 const INDEX_FILE_NAME: &str = "transcribe_later_index.json";
 const METADATA_FILE_NAME: &str = "metadata.json";
-static RECORDING_METADATA_WRITE_LOCK: Mutex<()> = Mutex::new(());
+static RECORDING_PROJECT_OPERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -190,6 +189,45 @@ fn ensure_recording_folder(folder_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_recording_folder_path(
+    recordings_root: &Path,
+    folder_path: &Path,
+    require_pending: bool,
+) -> Result<PathBuf, String> {
+    ensure_recording_folder(folder_path)?;
+    let canonical_root = recordings_root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve recordings folder: {}", error))?;
+    let canonical_folder = folder_path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve recording folder: {}", error))?;
+    if canonical_folder.parent() != Some(canonical_root.as_path()) {
+        return Err("Recording folder is outside the configured recordings folder".to_string());
+    }
+    if choose_audio_file(&canonical_folder).is_none() {
+        return Err("Recording folder contains no supported audio file".to_string());
+    }
+    if require_pending && has_completed_import_artifacts(&canonical_folder) {
+        return Err("Recording is no longer pending transcription".to_string());
+    }
+    Ok(canonical_folder)
+}
+
+async fn resolve_recording_folder<R: Runtime>(
+    app: &AppHandle<R>,
+    folder_path: &str,
+    require_pending: bool,
+) -> Result<PathBuf, String> {
+    let preferences = load_recording_preferences(app)
+        .await
+        .map_err(|error| format!("Failed to load recording preferences: {}", error))?;
+    validate_recording_folder_path(
+        &preferences.save_folder,
+        Path::new(folder_path),
+        require_pending,
+    )
+}
+
 fn read_recording_metadata(folder_path: &Path) -> Result<serde_json::Value, String> {
     ensure_recording_folder(folder_path)?;
     let metadata_path = folder_path.join(METADATA_FILE_NAME);
@@ -240,9 +278,6 @@ fn write_recording_projects(
     folder_path: &Path,
     projects: &[RecordingProject],
 ) -> Result<(), String> {
-    let _guard = RECORDING_METADATA_WRITE_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut metadata = read_recording_metadata(folder_path)?;
     let object = metadata
         .as_object_mut()
@@ -291,6 +326,22 @@ fn remove_recording_project(
     Ok(projects)
 }
 
+async fn assign_recording_project_serialized(
+    folder_path: &Path,
+    project: RecordingProject,
+) -> Result<Vec<RecordingProject>, String> {
+    let _guard = RECORDING_PROJECT_OPERATION_LOCK.lock().await;
+    assign_recording_project(folder_path, project)
+}
+
+async fn remove_recording_project_serialized(
+    folder_path: &Path,
+    project_id: &str,
+) -> Result<Vec<RecordingProject>, String> {
+    let _guard = RECORDING_PROJECT_OPERATION_LOCK.lock().await;
+    remove_recording_project(folder_path, project_id)
+}
+
 async fn transfer_recording_projects(
     pool: &SqlitePool,
     folder_path: &Path,
@@ -322,6 +373,15 @@ async fn transfer_recording_projects(
     valid_projects.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     write_recording_projects(folder_path, &valid_projects)?;
     Ok(valid_projects)
+}
+
+async fn transfer_recording_projects_serialized(
+    pool: &SqlitePool,
+    folder_path: &Path,
+    meeting_id: &str,
+) -> Result<Vec<RecordingProject>, String> {
+    let _guard = RECORDING_PROJECT_OPERATION_LOCK.lock().await;
+    transfer_recording_projects(pool, folder_path, meeting_id).await
 }
 
 fn read_audio_duration_seconds(audio_path: &Path) -> Option<f64> {
@@ -615,45 +675,48 @@ pub async fn list_pending_recordings_to_transcribe<R: Runtime>(
 }
 
 #[tauri::command]
-pub async fn assign_transcribe_later_recording_project(
+pub async fn assign_transcribe_later_recording_project<R: Runtime>(
+    app: AppHandle<R>,
     folder_path: String,
     project_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<RecordingProject>, String> {
+    let recording_folder = resolve_recording_folder(&app, &folder_path, true).await?;
     let project = ProjectRepository::get(state.db_manager.pool(), &project_id)
         .await
         .map_err(|error| format!("Failed to load project: {}", error))?
         .ok_or_else(|| "Project not found".to_string())?;
-    assign_recording_project(
-        Path::new(&folder_path),
+    assign_recording_project_serialized(
+        &recording_folder,
         RecordingProject {
             id: project.id,
             name: project.name,
             normalized_name: project.normalized_name,
         },
     )
+    .await
 }
 
 #[tauri::command]
-pub async fn remove_transcribe_later_recording_project(
+pub async fn remove_transcribe_later_recording_project<R: Runtime>(
+    app: AppHandle<R>,
     folder_path: String,
     project_id: String,
 ) -> Result<Vec<RecordingProject>, String> {
-    remove_recording_project(Path::new(&folder_path), &project_id)
+    let recording_folder = resolve_recording_folder(&app, &folder_path, true).await?;
+    remove_recording_project_serialized(&recording_folder, &project_id).await
 }
 
 #[tauri::command]
-pub async fn transfer_transcribe_later_recording_projects(
+pub async fn transfer_transcribe_later_recording_projects<R: Runtime>(
+    app: AppHandle<R>,
     folder_path: String,
     meeting_id: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<RecordingProject>, String> {
-    transfer_recording_projects(
-        state.db_manager.pool(),
-        Path::new(&folder_path),
-        &meeting_id,
-    )
-    .await
+    let recording_folder = resolve_recording_folder(&app, &folder_path, false).await?;
+    transfer_recording_projects_serialized(state.db_manager.pool(), &recording_folder, &meeting_id)
+        .await
 }
 
 #[tauri::command]
@@ -805,6 +868,44 @@ mod recording_projects_tests {
 
         let error = assign_recording_project(&file, project("p", "Project")).unwrap_err();
         assert!(error.contains("Recording folder no longer exists"));
+    }
+
+    #[tokio::test]
+    async fn recording_project_assignments_are_serialized_without_lost_updates() {
+        let recording = tempdir().unwrap();
+        let folder = recording.path().to_path_buf();
+
+        let (first, second) = tokio::join!(
+            assign_recording_project_serialized(&folder, project("p1", "First")),
+            assign_recording_project_serialized(&folder, project("p2", "Second")),
+        );
+        first.unwrap();
+        second.unwrap();
+
+        assert_eq!(read_recording_projects(&folder).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn recording_project_paths_must_be_supported_children_of_the_configured_root() {
+        let recordings_root = tempdir().unwrap();
+        let recording = recordings_root.path().join("Meeting");
+        fs::create_dir(&recording).unwrap();
+        fs::write(recording.join("audio.mp4"), b"audio").unwrap();
+
+        assert_eq!(
+            validate_recording_folder_path(recordings_root.path(), &recording, true).unwrap(),
+            recording.canonicalize().unwrap()
+        );
+
+        let outside_root = tempdir().unwrap();
+        let outside_recording = outside_root.path().join("Meeting");
+        fs::create_dir(&outside_recording).unwrap();
+        fs::write(outside_recording.join("audio.mp4"), b"audio").unwrap();
+        assert!(
+            validate_recording_folder_path(recordings_root.path(), &outside_recording, true)
+                .unwrap_err()
+                .contains("outside the configured recordings folder")
+        );
     }
 
     #[tokio::test]

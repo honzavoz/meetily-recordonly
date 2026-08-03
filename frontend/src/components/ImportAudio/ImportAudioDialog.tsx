@@ -107,9 +107,10 @@ export function ImportAudioDialog({
   const handleImportComplete = useCallback(async (result: ImportResult) => {
     toast.success(`Import complete! ${result.segments_count} segments created.`);
 
-    // Refresh meetings list then navigate to the imported meeting
-    await refetchMeetings();
+    // Transfer pending-recording metadata before refreshing the meeting list,
+    // so the newly imported meeting already includes its projects.
     await onComplete?.(result);
+    await refetchMeetings();
     onOpenChange(false);
     router.push(`/meeting-details?id=${result.meeting_id}`);
   }, [router, refetchMeetings, onComplete, onOpenChange]);

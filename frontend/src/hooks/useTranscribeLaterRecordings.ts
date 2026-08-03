@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import type { TranscribeLaterRecording } from '@/lib/transcribe-later';
 import { transcribeLaterService } from '@/services/transcribeLaterService';
@@ -15,6 +15,7 @@ export interface OpenTranscribeLaterImportDetail {
 export function useTranscribeLaterRecordings() {
   const [recordings, setRecordings] = useState<TranscribeLaterRecording[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const pendingProjectOperationsRef = useRef(new Set<string>());
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
@@ -117,32 +118,39 @@ export function useTranscribeLaterRecordings() {
     }
   }, [refresh]);
 
-  const updateRecordingProjects = useCallback((recordingId: string, projects: Project[]) => {
-    setRecordings((current) => current.map((recording) => recording.id === recordingId
-      ? { ...recording, projects }
-      : recording));
-  }, []);
-
   const assignProject = useCallback(async (
     recording: TranscribeLaterRecording,
     project: Project,
   ) => {
     if ((recording.projects ?? []).some((assigned) => assigned.id === project.id)) return;
-    const previousProjects = recording.projects ?? [];
-    updateRecordingProjects(recording.id, [...previousProjects, project]);
+    const operationKey = `${recording.id}:${project.id}`;
+    if (pendingProjectOperationsRef.current.has(operationKey)) return;
+    pendingProjectOperationsRef.current.add(operationKey);
+    setRecordings((current) => current.map((item) => item.id === recording.id
+      ? {
+        ...item,
+        projects: (item.projects ?? []).some((assigned) => assigned.id === project.id)
+          ? item.projects
+          : [...(item.projects ?? []), project],
+      }
+      : item));
     try {
-      updateRecordingProjects(
-        recording.id,
-        await transcribeLaterService.assignProject(recording, project.id),
-      );
+      await transcribeLaterService.assignProject(recording, project.id);
     } catch (error) {
-      updateRecordingProjects(recording.id, previousProjects);
+      setRecordings((current) => current.map((item) => item.id === recording.id
+        ? {
+          ...item,
+          projects: (item.projects ?? []).filter((assigned) => assigned.id !== project.id),
+        }
+        : item));
       toast.error('Project assignment failed', {
         description: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    } finally {
+      pendingProjectOperationsRef.current.delete(operationKey);
     }
-  }, [updateRecordingProjects]);
+  }, []);
 
   const removeProject = useCallback(async (
     recording: TranscribeLaterRecording,
@@ -150,23 +158,35 @@ export function useTranscribeLaterRecordings() {
   ) => {
     const previousProjects = recording.projects ?? [];
     if (!previousProjects.some((project) => project.id === projectId)) return;
-    updateRecordingProjects(
-      recording.id,
-      previousProjects.filter((project) => project.id !== projectId),
-    );
+    const operationKey = `${recording.id}:${projectId}`;
+    if (pendingProjectOperationsRef.current.has(operationKey)) return;
+    pendingProjectOperationsRef.current.add(operationKey);
+    const removedProject = previousProjects.find((project) => project.id === projectId)!;
+    setRecordings((current) => current.map((item) => item.id === recording.id
+      ? {
+        ...item,
+        projects: (item.projects ?? []).filter((project) => project.id !== projectId),
+      }
+      : item));
     try {
-      updateRecordingProjects(
-        recording.id,
-        await transcribeLaterService.removeProject(recording, projectId),
-      );
+      await transcribeLaterService.removeProject(recording, projectId);
     } catch (error) {
-      updateRecordingProjects(recording.id, previousProjects);
+      setRecordings((current) => current.map((item) => item.id === recording.id
+        ? {
+          ...item,
+          projects: (item.projects ?? []).some((project) => project.id === projectId)
+            ? item.projects
+            : [...(item.projects ?? []), removedProject],
+        }
+        : item));
       toast.error('Project removal failed', {
         description: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    } finally {
+      pendingProjectOperationsRef.current.delete(operationKey);
     }
-  }, [updateRecordingProjects]);
+  }, []);
 
   const createAndAssignProject = useCallback(async (
     recording: TranscribeLaterRecording,

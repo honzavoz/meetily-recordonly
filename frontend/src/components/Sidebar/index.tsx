@@ -934,7 +934,7 @@ const Sidebar: React.FC = () => {
                   </div>
                   <div className="min-w-0 flex-1">
                     <button
-                      className="block w-full truncate text-left font-medium text-gray-800"
+                      className="block w-full break-words text-left font-medium leading-tight text-gray-800"
                       onClick={() => transcribeLater.transcribe(recording)}
                       title={recording.title}
                     >
