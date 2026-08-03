@@ -8,6 +8,11 @@ interface MeetingWorkspaceTabsProps {
   onChange: (pane: CompactMeetingPane) => void;
 }
 
+export const MEETING_PANE_IDS: Record<CompactMeetingPane, string> = {
+  transcript: 'meeting-transcript-pane',
+  summary: 'meeting-summary-pane',
+};
+
 const panes: Array<{ value: CompactMeetingPane; label: string }> = [
   { value: 'transcript', label: 'Transcript' },
   { value: 'summary', label: 'Summary' },
@@ -17,24 +22,23 @@ export function MeetingWorkspaceTabs({ value, onChange }: MeetingWorkspaceTabsPr
   return (
     <div
       className="grid shrink-0 grid-cols-2 gap-1 border-b border-gray-200 bg-white p-2 lg:hidden"
-      role="tablist"
+      role="group"
       aria-label="Meeting workspace"
     >
       {panes.map((pane) => (
         <button
           key={pane.value}
           type="button"
-          role="tab"
-          aria-selected={value === pane.value}
-          tabIndex={value === pane.value ? 0 : -1}
+          aria-pressed={value === pane.value}
+          aria-controls={MEETING_PANE_IDS[pane.value]}
           onClick={() => onChange(pane.value)}
           onKeyDown={(event) => {
             if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
             event.preventDefault();
             onChange(getAdjacentCompactPane(value, event.key));
-            const tabList = event.currentTarget.closest('[role="tablist"]');
-            const nextTab = tabList?.querySelector<HTMLButtonElement>(
-              `[role="tab"][aria-selected="false"]`,
+            const switcher = event.currentTarget.closest('[role="group"]');
+            const nextTab = switcher?.querySelector<HTMLButtonElement>(
+              `[aria-pressed="false"]`,
             );
             nextTab?.focus();
           }}

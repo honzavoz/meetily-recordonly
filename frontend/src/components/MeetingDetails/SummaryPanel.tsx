@@ -335,6 +335,8 @@ export function SummaryPanel({
   const compactOverflow = (
     <SummaryActionsOverflow
       hasSummary={!!aiSummary}
+      hasTranscripts={transcripts.length > 0}
+      isGenerating={isSummaryLoading}
       templates={availableTemplates}
       selectedTemplate={selectedTemplate}
       isPreparingExternalAI={externalAI.isPreparingPrompt}

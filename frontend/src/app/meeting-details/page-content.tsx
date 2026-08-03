@@ -8,7 +8,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
-import { MeetingWorkspaceTabs } from '@/components/MeetingDetails/MeetingWorkspaceTabs';
+import {
+  MEETING_PANE_IDS,
+  MeetingWorkspaceTabs,
+} from '@/components/MeetingDetails/MeetingWorkspaceTabs';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import {
   DEFAULT_COMPACT_MEETING_PANE,
@@ -194,7 +197,7 @@ export default function PageContent({
         <MeetingWorkspaceTabs value={compactPane} onChange={setCompactPane} />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
-            role="tabpanel"
+            id={MEETING_PANE_IDS.transcript}
             aria-label="Transcript"
             className={`${compactPane === 'transcript' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 lg:flex lg:max-w-[38%]`}
           >
@@ -221,7 +224,7 @@ export default function PageContent({
             />
           </div>
           <div
-            role="tabpanel"
+            id={MEETING_PANE_IDS.summary}
             aria-label="Summary"
             className={`${compactPane === 'summary' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 lg:flex`}
           >

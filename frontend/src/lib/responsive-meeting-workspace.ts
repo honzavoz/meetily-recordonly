@@ -22,18 +22,22 @@ export type CompactSummaryAction =
 export function getCompactSummaryActions({
   hasSummary,
   hasTemplates,
+  hasTranscripts,
+  isGenerating,
 }: {
   hasSummary: boolean;
   hasTemplates: boolean;
+  hasTranscripts: boolean;
+  isGenerating: boolean;
 }): CompactSummaryAction[] {
-  const actions: CompactSummaryAction[] = [
-    'external-ai',
-    'paste-ai-result',
-    'ai-model',
-  ];
+  if (!hasTranscripts) return [];
+
+  const actions: CompactSummaryAction[] = isGenerating
+    ? ['ai-model']
+    : ['external-ai', 'paste-ai-result', 'ai-model'];
 
   if (hasTemplates) actions.push('template');
-  if (hasSummary) actions.push('copy-summary');
+  if (hasSummary && !isGenerating) actions.push('copy-summary');
 
   return actions;
 }

@@ -24,6 +24,8 @@ import { getCompactSummaryActions } from '@/lib/responsive-meeting-workspace';
 
 interface SummaryActionsOverflowProps {
   hasSummary: boolean;
+  hasTranscripts: boolean;
+  isGenerating: boolean;
   templates: Array<{ id: string; name: string; description: string }>;
   selectedTemplate: string;
   isPreparingExternalAI: boolean;
@@ -36,6 +38,8 @@ interface SummaryActionsOverflowProps {
 
 export function SummaryActionsOverflow({
   hasSummary,
+  hasTranscripts,
+  isGenerating,
   templates,
   selectedTemplate,
   isPreparingExternalAI,
@@ -48,7 +52,11 @@ export function SummaryActionsOverflow({
   const actions = getCompactSummaryActions({
     hasSummary,
     hasTemplates: templates.length > 0,
+    hasTranscripts,
+    isGenerating,
   });
+
+  if (actions.length === 0) return null;
 
   return (
     <DropdownMenu>
