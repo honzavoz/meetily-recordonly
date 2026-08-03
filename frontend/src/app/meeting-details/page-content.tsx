@@ -193,13 +193,13 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <MeetingWorkspaceTabs value={compactPane} onChange={setCompactPane} />
         <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
           <div
             id={MEETING_PANE_IDS.transcript}
             aria-label="Transcript"
-            className={`${compactPane === 'transcript' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 lg:flex lg:max-w-[38%]`}
+            className={`${compactPane === 'transcript' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 pb-20 lg:flex lg:max-w-[38%] lg:pb-0`}
           >
             <TranscriptPanel
               transcripts={meetingData.transcripts}
@@ -226,7 +226,7 @@ export default function PageContent({
           <div
             id={MEETING_PANE_IDS.summary}
             aria-label="Summary"
-            className={`${compactPane === 'summary' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 lg:flex`}
+            className={`${compactPane === 'summary' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 pb-20 lg:flex lg:pb-0`}
           >
             <SummaryPanel
               meeting={meeting}

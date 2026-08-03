@@ -187,7 +187,10 @@
   .meetily-summary-editor .ProseMirror,
   .meetily-summary-editor .bn-block-outer,
   .meetily-summary-editor .bn-block,
+  .meetily-summary-editor .bn-block-group,
   .meetily-summary-editor .bn-block-content,
+  .meetily-summary-editor .bn-inline-content,
+  .meetily-summary-editor [contenteditable="true"],
   .meetily-summary-editor .bn-default-styles {
     box-sizing: border-box;
     min-width: 0 !important;
@@ -197,6 +200,7 @@
 
   .meetily-summary-editor .ProseMirror,
   .meetily-summary-editor .bn-inline-content,
+  .meetily-summary-editor [contenteditable="true"],
   .meetily-summary-editor p,
   .meetily-summary-editor h1,
   .meetily-summary-editor h2,
@@ -206,8 +210,15 @@
   .meetily-summary-editor h6,
   .meetily-summary-editor a,
   .meetily-summary-editor li {
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
+  }
+
+  .meetily-summary-editor .bn-inline-content > *,
+  .meetily-summary-editor [contenteditable="true"] > * {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .meetily-summary-editor img,

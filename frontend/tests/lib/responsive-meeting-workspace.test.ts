@@ -1,10 +1,20 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   DEFAULT_COMPACT_MEETING_PANE,
   getAdjacentCompactPane,
   getCompactSummaryActions,
   type CompactMeetingPane,
 } from '@/lib/responsive-meeting-workspace';
+
+const workspaceSource = readFileSync(
+  new URL('../../src/app/meeting-details/page-content.tsx', import.meta.url),
+  'utf8',
+);
+const tabsSource = readFileSync(
+  new URL('../../src/components/MeetingDetails/MeetingWorkspaceTabs.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('responsive meeting workspace', () => {
   test('opens the summary pane by default in compact mode', () => {
@@ -61,5 +71,15 @@ describe('responsive meeting workspace', () => {
     expect(getAdjacentCompactPane('summary', 'ArrowLeft')).toBe('transcript');
     expect(getAdjacentCompactPane('transcript', 'ArrowRight')).toBe('summary');
     expect(getAdjacentCompactPane('summary', 'ArrowRight')).toBe('transcript');
+  });
+
+  test('keeps the compact pane switcher outside normal document flow', () => {
+    expect(tabsSource).toContain('absolute');
+    expect(tabsSource).toContain('bottom-');
+    expect(workspaceSource).toContain('relative');
+  });
+
+  test('keeps pane endings reachable behind the floating switcher', () => {
+    expect(workspaceSource.match(/pb-20/g)?.length).toBe(2);
   });
 });

@@ -21,7 +21,7 @@ const panes: Array<{ value: CompactMeetingPane; label: string }> = [
 export function MeetingWorkspaceTabs({ value, onChange }: MeetingWorkspaceTabsProps) {
   return (
     <div
-      className="grid shrink-0 grid-cols-2 gap-1 border-b border-gray-200 bg-white p-2 lg:hidden"
+      className="absolute inset-x-3 bottom-3 z-30 mx-auto grid max-w-md grid-cols-2 gap-1 rounded-xl border border-gray-200 bg-white/95 p-1.5 shadow-lg backdrop-blur lg:hidden"
       role="group"
       aria-label="Meeting workspace"
     >

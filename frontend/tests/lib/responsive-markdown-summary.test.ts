@@ -43,6 +43,13 @@ describe('responsive markdown summary layout contract', () => {
     expect(globalStyles).not.toMatch(/\[data-node-type\]\s*\{[^}]*overflow:\s*visible\s*!important/);
   });
 
+  test('constrains the complete BlockNote text width chain', () => {
+    expect(globalStyles).toContain('.meetily-summary-editor .bn-block-group');
+    expect(globalStyles).toContain('.meetily-summary-editor .bn-inline-content');
+    expect(globalStyles).toContain('.meetily-summary-editor [contenteditable="true"]');
+    expect(globalStyles).toContain('white-space: pre-wrap');
+  });
+
   test('uses the bounded scroll contract for rendered summary content', () => {
     expect(summaryPanelSource).toContain('RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.scrollArea');
   });
