@@ -8,6 +8,7 @@ import { Block } from '@blocknote/core';
 import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
+import { RESPONSIVE_MARKDOWN_SUMMARY_CLASSES } from '@/lib/responsive-markdown-summary';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -237,8 +238,8 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   if (format === 'blocknote') {
     console.log('🎨 Rendering BLOCKNOTE format (direct)');
     return (
-      <div className="flex flex-col w-full">
-        <div className="w-full">
+      <div className="flex min-w-0 w-full max-w-full flex-col">
+        <div className={RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.editorBoundary}>
           <Editor
             initialContent={data.summary_json}
             onChange={(blocks) => {
@@ -256,8 +257,8 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   if (format === 'markdown') {
     console.log('🎨 Rendering MARKDOWN format (parsed to BlockNote)');
     return (
-      <div className="flex flex-col w-full">
-        <div className="w-full">
+      <div className="flex min-w-0 w-full max-w-full flex-col">
+        <div className={RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.editorBoundary}>
           <BlockNoteView
             editor={editor}
             editable={true}

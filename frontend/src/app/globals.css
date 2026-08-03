@@ -180,35 +180,54 @@
     scrollbar-color: #d1d5db transparent;
   }
 
-  /* BlockNote Editor - Override fixed dimensions for responsive layout */
-  .bn-container {
+  /* Keep meeting summaries inside their pane while preserving local wide-content scrolling. */
+  .meetily-summary-editor,
+  .meetily-summary-editor .bn-container,
+  .meetily-summary-editor .bn-editor,
+  .meetily-summary-editor .ProseMirror,
+  .meetily-summary-editor .bn-block-outer,
+  .meetily-summary-editor .bn-block,
+  .meetily-summary-editor .bn-block-content,
+  .meetily-summary-editor .bn-default-styles {
+    box-sizing: border-box;
+    min-width: 0 !important;
     width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
-  }
-
-  .bn-editor {
-    width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
-  }
-
-  /* Disable internal scrolling - let parent handle all scrolling */
-  .ProseMirror {
-    overflow: visible !important;
-  }
-
-  /* Ensure BlockNote content area is responsive */
-  .bn-block-outer {
     max-width: 100% !important;
   }
 
-  .bn-default-styles {
-    max-width: none !important;
+  .meetily-summary-editor .ProseMirror,
+  .meetily-summary-editor .bn-inline-content,
+  .meetily-summary-editor p,
+  .meetily-summary-editor h1,
+  .meetily-summary-editor h2,
+  .meetily-summary-editor h3,
+  .meetily-summary-editor h4,
+  .meetily-summary-editor h5,
+  .meetily-summary-editor h6,
+  .meetily-summary-editor a,
+  .meetily-summary-editor li {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
-  /* Disable scrolling on any BlockNote wrapper elements */
-  [data-node-type] {
-    overflow: visible !important;
+  .meetily-summary-editor img,
+  .meetily-summary-editor video,
+  .meetily-summary-editor iframe {
+    height: auto;
+    max-width: 100%;
+  }
+
+  .meetily-summary-editor pre {
+    display: block;
+    max-width: 100% !important;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .meetily-summary-editor table {
+    display: block;
+    width: max-content;
+    max-width: 100% !important;
+    overflow-x: auto;
   }
 }
