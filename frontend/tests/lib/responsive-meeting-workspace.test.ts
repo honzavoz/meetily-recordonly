@@ -1,0 +1,30 @@
+import { describe, expect, test } from 'bun:test';
+import {
+  DEFAULT_COMPACT_MEETING_PANE,
+  getCompactSummaryActions,
+  type CompactMeetingPane,
+} from '@/lib/responsive-meeting-workspace';
+
+describe('responsive meeting workspace', () => {
+  test('opens the summary pane by default in compact mode', () => {
+    expect(DEFAULT_COMPACT_MEETING_PANE satisfies CompactMeetingPane).toBe('summary');
+  });
+
+  test('keeps all available secondary summary actions in the compact menu', () => {
+    expect(getCompactSummaryActions({ hasSummary: true, hasTemplates: true })).toEqual([
+      'external-ai',
+      'paste-ai-result',
+      'ai-model',
+      'template',
+      'copy-summary',
+    ]);
+  });
+
+  test('omits actions that need unavailable summary data', () => {
+    expect(getCompactSummaryActions({ hasSummary: false, hasTemplates: false })).toEqual([
+      'external-ai',
+      'paste-ai-result',
+      'ai-model',
+    ]);
+  });
+});
