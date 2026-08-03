@@ -48,7 +48,7 @@ interface ImportAudioDialogProps {
   onOpenChange: (open: boolean) => void;
   preselectedFile?: string | null;
   preselectedTitle?: string | null;
-  onComplete?: () => void;
+  onComplete?: (result: ImportResult) => void | Promise<void>;
 }
 
 function formatDuration(seconds: number): string {
@@ -104,12 +104,12 @@ export function ImportAudioDialog({
     resetSelection,
   } = useTranscriptionModels(transcriptModelConfig, importPreferences.modelKey);
 
-  const handleImportComplete = useCallback((result: ImportResult) => {
+  const handleImportComplete = useCallback(async (result: ImportResult) => {
     toast.success(`Import complete! ${result.segments_count} segments created.`);
 
     // Refresh meetings list then navigate to the imported meeting
-    refetchMeetings();
-    onComplete?.();
+    await refetchMeetings();
+    await onComplete?.(result);
     onOpenChange(false);
     router.push(`/meeting-details?id=${result.meeting_id}`);
   }, [router, refetchMeetings, onComplete, onOpenChange]);

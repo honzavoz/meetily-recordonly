@@ -90,4 +90,16 @@ describe("TranscribeLaterService", () => {
       meetingId: "meeting-1",
     });
   });
+
+  test("transfers projects before marking an imported recording complete", async () => {
+    const service = new TranscribeLaterService();
+    const pendingRecording = recording();
+
+    await service.completeImport(pendingRecording, "meeting-1");
+
+    expect(invokeMock.mock.calls.map(([command]) => command)).toEqual([
+      "transfer_transcribe_later_recording_projects",
+      "mark_recording_transcribed",
+    ]);
+  });
 });

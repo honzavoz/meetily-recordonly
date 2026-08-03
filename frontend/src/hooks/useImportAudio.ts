@@ -33,7 +33,7 @@ export interface ImportError {
 export type ImportStatus = 'idle' | 'validating' | 'processing' | 'complete' | 'error';
 
 export interface UseImportAudioOptions {
-  onComplete?: (result: ImportResult) => void;
+  onComplete?: (result: ImportResult) => void | Promise<void>;
   onError?: (error: string) => void;
 }
 
@@ -118,7 +118,7 @@ export function useImportAudio({
               description: 'The imported meeting was saved, but the default summary language was not applied.',
             });
           }
-          onCompleteRef.current?.(event.payload);
+          await onCompleteRef.current?.(event.payload);
         }
       );
       if (cleanedUpRef.current) {

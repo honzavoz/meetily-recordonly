@@ -70,6 +70,11 @@ export class TranscribeLaterService {
       meetingId,
     });
   }
+
+  async completeImport(recording: TranscribeLaterRecording, meetingId: string): Promise<void> {
+    await this.transferProjects(recording, meetingId);
+    await this.markTranscribed(recording);
+  }
 }
 
 export const transcribeLaterService = new TranscribeLaterService();

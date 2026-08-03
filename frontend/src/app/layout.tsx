@@ -26,6 +26,7 @@ import { ImportAudioDialog, ImportDropOverlay } from '@/components/ImportAudio'
 import { ImportDialogProvider } from '@/contexts/ImportDialogContext'
 import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioFormats'
 import type { TranscribeLaterRecording } from '@/lib/transcribe-later'
+import type { ImportResult } from '@/hooks/useImportAudio'
 import { getTranscribeLaterTitle } from '@/lib/transcribe-later'
 import { transcribeLaterService } from '@/services/transcribeLaterService'
 import {
@@ -55,7 +56,7 @@ function ConditionalImportDialog({
   handleImportDialogClose: (open: boolean) => void;
   importFilePath: string | null;
   importTitle?: string | null;
-  onComplete?: () => void;
+  onComplete?: (result: ImportResult) => void | Promise<void>;
 }) {
   const { betaFeatures } = useConfig();
 
@@ -242,21 +243,21 @@ export default function RootLayout({
     setShowImportDialog(true);
   }, []);
 
-  const handleImportComplete = useCallback(async () => {
+  const handleImportComplete = useCallback(async (result: ImportResult) => {
     if (!transcribeLaterImport) {
       return;
     }
 
     try {
-      await transcribeLaterService.markTranscribed(transcribeLaterImport);
+      await transcribeLaterService.completeImport(transcribeLaterImport, result.meeting_id);
       window.dispatchEvent(new CustomEvent(REFRESH_TRANSCRIBE_LATER_EVENT));
       toast.success('Removed from To Transcribe', {
         description: `"${getTranscribeLaterTitle(transcribeLaterImport)}" is now in Meeting Notes.`,
       });
     } catch (error) {
       console.error('[Layout] Failed to mark recording as transcribed:', error);
-      toast.warning('Recording imported, but it may still appear in To Transcribe', {
-        description: error instanceof Error ? error.message : String(error),
+      toast.warning('Recording imported, but projects could not be transferred', {
+        description: `The audio and meeting are safe, and the recording remains in To Transcribe. ${error instanceof Error ? error.message : String(error)}`,
       });
     } finally {
       setTranscribeLaterImport(null);
