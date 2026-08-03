@@ -375,11 +375,11 @@ export function SummaryPanel({
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
           <div className="min-w-0 pt-0">
-            <div className="hidden min-w-0 flex-wrap items-center justify-center gap-2 lg:flex">
+            <div className="meeting-summary-actions-wide hidden min-w-0 flex-wrap items-center justify-center gap-2">
               {renderGenerator(true)}
               {renderUpdater(true)}
             </div>
-            <div className="flex min-w-0 items-center justify-between gap-2 lg:hidden">
+            <div className="meeting-summary-actions-compact flex min-w-0 items-center justify-between gap-2">
               <div className="min-w-0">{renderGenerator(false)}</div>
               <div className="flex shrink-0 items-center gap-2">
                 {renderUpdater(false)}
@@ -394,8 +394,8 @@ export function SummaryPanel({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* Show button group during generation */}
           <div className="shrink-0 px-3 pb-4 pt-6 sm:px-4 sm:pt-8">
-            <div className="hidden justify-center lg:flex">{renderGenerator(true, false)}</div>
-            <div className="flex items-center justify-between gap-2 lg:hidden">
+            <div className="meeting-summary-actions-wide hidden justify-center">{renderGenerator(true, false)}</div>
+            <div className="meeting-summary-actions-compact flex items-center justify-between gap-2">
               {renderGenerator(false, false)}
               {compactOverflow}
             </div>
@@ -412,8 +412,8 @@ export function SummaryPanel({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* Centered Summary Generator Button Group when no summary */}
           <div className="shrink-0 px-3 pb-4 pt-6 sm:px-4 sm:pt-8">
-            <div className="hidden justify-center lg:flex">{renderGenerator(true)}</div>
-            <div className="flex items-center justify-between gap-2 lg:hidden">
+            <div className="meeting-summary-actions-wide hidden justify-center">{renderGenerator(true)}</div>
+            <div className="meeting-summary-actions-compact flex items-center justify-between gap-2">
               {renderGenerator(false)}
               {compactOverflow}
             </div>

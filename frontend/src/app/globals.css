@@ -28,6 +28,33 @@
   }
 }
 
+/* Main content owns the space left by the fixed sidebar and drives meeting responsiveness. */
+.meetily-main-content {
+  container: meetily-main / inline-size;
+}
+
+@container meetily-main (min-width: 1024px) {
+  .meeting-workspace-switcher,
+  .meeting-summary-actions-compact {
+    display: none !important;
+  }
+
+  .meeting-transcript-pane,
+  .meeting-summary-pane,
+  .meeting-summary-actions-wide {
+    display: flex !important;
+  }
+
+  .meeting-transcript-pane,
+  .meeting-summary-pane {
+    padding-bottom: 0 !important;
+  }
+
+  .meeting-transcript-pane {
+    max-width: 38%;
+  }
+}
+
 .animate-vibrate {
   animation: vibrate 0.3s linear;
 }

@@ -199,7 +199,7 @@ export default function PageContent({
           <div
             id={MEETING_PANE_IDS.transcript}
             aria-label="Transcript"
-            className={`${compactPane === 'transcript' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 pb-20 lg:flex lg:max-w-[38%] lg:pb-0`}
+            className={`meeting-transcript-pane ${compactPane === 'transcript' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 pb-20`}
           >
             <TranscriptPanel
               transcripts={meetingData.transcripts}
@@ -226,7 +226,7 @@ export default function PageContent({
           <div
             id={MEETING_PANE_IDS.summary}
             aria-label="Summary"
-            className={`${compactPane === 'summary' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 pb-20 lg:flex lg:pb-0`}
+            className={`meeting-summary-pane ${compactPane === 'summary' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 pb-20`}
           >
             <SummaryPanel
               meeting={meeting}
