@@ -1,4 +1,5 @@
 import { formatSidebarDateTime } from '@/lib/sidebar-meetings';
+import type { Project } from '@/types/projects';
 
 export type TranscribeLaterStatus = 'pending' | 'imported' | 'hidden';
 
@@ -20,6 +21,7 @@ export interface TranscribeLaterRecording {
   durationSeconds?: number | null;
   status: TranscribeLaterStatus;
   indexEntry?: TranscribeLaterIndexEntry | null;
+  projects: Project[];
 }
 
 function isSameFileSnapshot(
@@ -118,6 +120,7 @@ export function filterTranscribeLaterRecordings(
       getTranscribeLaterTitle(recording),
       getTranscribeLaterSubtitle(recording),
       recording.title,
+      ...(recording.projects ?? []).map((project) => project.name),
     ].join(' ').toLowerCase();
 
     return searchableText.includes(normalizedQuery);

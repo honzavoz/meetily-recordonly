@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { TranscribeLaterRecording } from '@/lib/transcribe-later';
+import type { Project } from '@/types/projects';
 
 export class TranscribeLaterService {
   async listPending(): Promise<TranscribeLaterRecording[]> {
@@ -46,6 +47,27 @@ export class TranscribeLaterService {
   async openFolder(recording: TranscribeLaterRecording): Promise<void> {
     await invoke('open_transcribe_later_recording_folder', {
       folderPath: recording.folderPath,
+    });
+  }
+
+  async assignProject(recording: TranscribeLaterRecording, projectId: string): Promise<Project[]> {
+    return invoke<Project[]>('assign_transcribe_later_recording_project', {
+      folderPath: recording.folderPath,
+      projectId,
+    });
+  }
+
+  async removeProject(recording: TranscribeLaterRecording, projectId: string): Promise<Project[]> {
+    return invoke<Project[]>('remove_transcribe_later_recording_project', {
+      folderPath: recording.folderPath,
+      projectId,
+    });
+  }
+
+  async transferProjects(recording: TranscribeLaterRecording, meetingId: string): Promise<Project[]> {
+    return invoke<Project[]>('transfer_transcribe_later_recording_projects', {
+      folderPath: recording.folderPath,
+      meetingId,
     });
   }
 }

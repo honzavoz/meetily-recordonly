@@ -21,6 +21,7 @@ const recording = (
   modifiedAtMs: 1_788_017_731_000,
   durationSeconds: null,
   status: "pending",
+  projects: [],
   ...overrides,
 });
 
@@ -57,6 +58,19 @@ describe("transcribe later helpers", () => {
     expect(filterTranscribeLaterRecordings([clientKickoff, planning], "kick")).toEqual([clientKickoff]);
     expect(filterTranscribeLaterRecordings([clientKickoff, planning], "150.5")).toEqual([planning]);
     expect(filterTranscribeLaterRecordings([clientKickoff, planning], "   ")).toEqual([clientKickoff, planning]);
+  });
+
+  test("filters recordings by assigned project name", () => {
+    const clientKickoff = recording({
+      title: "Client kickoff",
+      projects: [{
+        id: "project-povolstav",
+        name: "Povolstav",
+        normalizedName: "povolstav",
+      }],
+    });
+
+    expect(filterTranscribeLaterRecordings([clientKickoff], "povolstav")).toEqual([clientKickoff]);
   });
 
   test("includes the recording title in delete confirmation text", () => {

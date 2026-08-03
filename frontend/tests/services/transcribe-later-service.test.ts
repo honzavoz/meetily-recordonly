@@ -18,6 +18,7 @@ const recording = (): TranscribeLaterRecording => ({
   modifiedAtMs: 1_788_017_731_000,
   durationSeconds: 120,
   status: "pending",
+  projects: [],
 });
 
 describe("TranscribeLaterService", () => {
@@ -58,6 +59,35 @@ describe("TranscribeLaterService", () => {
       folderPath: pendingRecording.folderPath,
       audioPath: pendingRecording.audioPath,
       title: "Client kickoff",
+    });
+  });
+
+  test("assigns and removes a project from recording metadata", async () => {
+    const service = new TranscribeLaterService();
+    const pendingRecording = recording();
+
+    await service.assignProject(pendingRecording, "project-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("assign_transcribe_later_recording_project", {
+      folderPath: pendingRecording.folderPath,
+      projectId: "project-1",
+    });
+
+    await service.removeProject(pendingRecording, "project-1");
+    expect(invokeMock).toHaveBeenLastCalledWith("remove_transcribe_later_recording_project", {
+      folderPath: pendingRecording.folderPath,
+      projectId: "project-1",
+    });
+  });
+
+  test("transfers projects to the imported meeting", async () => {
+    const service = new TranscribeLaterService();
+    const pendingRecording = recording();
+
+    await service.transferProjects(pendingRecording, "meeting-1");
+
+    expect(invokeMock).toHaveBeenCalledWith("transfer_transcribe_later_recording_projects", {
+      folderPath: pendingRecording.folderPath,
+      meetingId: "meeting-1",
     });
   });
 });
