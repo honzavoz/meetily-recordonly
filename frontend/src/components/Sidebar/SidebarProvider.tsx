@@ -103,6 +103,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [activeProjectView, setActiveProjectView] = useState<MeetingProjectView>({ type: 'all' });
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const projectColorQueues = React.useRef(new Map<string, Promise<Project>>());
+  const projectColorVersions = React.useRef(new Map<string, number>());
+  const projectColorIntents = React.useRef(new Map<string, string>());
+  const persistedProjectColors = React.useRef(new Map<string, string>());
 
   // Use recording state from RecordingStateContext (single source of truth)
   const { isRecording } = useRecordingState();
@@ -422,45 +426,61 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [meetings, projects]);
 
   const updateProjectColor = React.useCallback(async (projectId: string, color: ProjectColorKey) => {
-    const previousProjects = projects;
-    const previousMeetings = meetings;
-    const previousCurrentMeeting = currentMeeting;
-    const applyColor = (project: Project) => project.id === projectId ? { ...project, color } : project;
-
-    setProjects((current) => current.map(applyColor));
-    setMeetings((current) => current.map((meeting) => ({
-      ...meeting,
-      projects: (meeting.projects ?? []).map(applyColor),
-    })));
-    setCurrentMeeting((current) => current ? {
-      ...current,
-      projects: (current.projects ?? []).map(applyColor),
-    } : current);
-
-    try {
-      const updated = await projectService.updateColor(projectId, color);
-      const applyUpdated = (project: Project) => project.id === projectId
-        ? { ...project, color: updated.color }
-        : project;
-      setProjects((current) => current.map(applyUpdated));
+    if (!persistedProjectColors.current.has(projectId)) {
+      persistedProjectColors.current.set(
+        projectId,
+        projects.find((project) => project.id === projectId)?.color ?? 'blue',
+      );
+    }
+    const version = (projectColorVersions.current.get(projectId) ?? 0) + 1;
+    projectColorVersions.current.set(projectId, version);
+    projectColorIntents.current.set(projectId, color);
+    const applyColor = (nextColor: string) => (project: Project) => project.id === projectId
+      ? { ...project, color: nextColor }
+      : project;
+    const applyColorEverywhere = (nextColor: string) => {
+      const update = applyColor(nextColor);
+      setProjects((current) => current.map(update));
       setMeetings((current) => current.map((meeting) => ({
         ...meeting,
-        projects: (meeting.projects ?? []).map(applyUpdated),
+        projects: (meeting.projects ?? []).map(update),
       })));
       setCurrentMeeting((current) => current ? {
         ...current,
-        projects: (current.projects ?? []).map(applyUpdated),
+        projects: (current.projects ?? []).map(update),
       } : current);
+    };
+
+    applyColorEverywhere(color);
+    const previousOperation = projectColorQueues.current.get(projectId);
+    const operation = (previousOperation
+      ? previousOperation.catch(() => undefined)
+      : Promise.resolve())
+      .then(() => projectService.updateColor(projectId, color));
+    projectColorQueues.current.set(projectId, operation);
+
+    try {
+      const updated = await operation;
+      persistedProjectColors.current.set(projectId, updated.color);
+      if (projectColorVersions.current.get(projectId) === version) {
+        projectColorIntents.current.set(projectId, updated.color);
+        applyColorEverywhere(updated.color);
+      }
     } catch (error) {
-      setProjects(previousProjects);
-      setMeetings(previousMeetings);
-      setCurrentMeeting(previousCurrentMeeting);
-      toast.error('Project color update failed', {
-        description: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
+      if (projectColorVersions.current.get(projectId) === version) {
+        const persistedColor = persistedProjectColors.current.get(projectId) ?? 'blue';
+        projectColorIntents.current.set(projectId, persistedColor);
+        applyColorEverywhere(persistedColor);
+        toast.error('Project color update failed', {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } finally {
+      if (projectColorQueues.current.get(projectId) === operation) {
+        projectColorQueues.current.delete(projectId);
+      }
     }
-  }, [currentMeeting, meetings, projects]);
+  }, [projects]);
 
   const deleteProject = React.useCallback(async (projectId: string) => {
     const previousProjects = projects;

@@ -35,7 +35,7 @@ export function ProjectColorPicker({
               <button
                 key={key}
                 type="button"
-                onClick={() => onChange(key)}
+                onClick={() => void onChange(key)}
                 className="relative flex h-8 items-center justify-center rounded-lg hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
                 aria-label={`Set ${project.name} color to ${color.label}`}
                 aria-pressed={active}

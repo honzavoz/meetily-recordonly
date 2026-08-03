@@ -20,6 +20,13 @@ impl ProjectRepository {
         &Self::COLORS
     }
 
+    fn color_for_id(id: &str) -> &'static str {
+        let hash = id.bytes().fold(0usize, |value, byte| {
+            value.wrapping_mul(31).wrapping_add(byte as usize)
+        });
+        Self::COLORS[hash % Self::COLORS.len()]
+    }
+
     pub fn normalize_name(name: &str) -> Result<(String, String), SqlxError> {
         let display_name = name.split_whitespace().collect::<Vec<_>>().join(" ");
         if display_name.is_empty() {
@@ -76,10 +83,7 @@ impl ProjectRepository {
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().naive_utc();
-        let project_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
-            .fetch_one(pool)
-            .await?;
-        let color = Self::COLORS[project_count.rem_euclid(Self::COLORS.len() as i64) as usize];
+        let color = Self::color_for_id(&id);
         let insert = sqlx::query(
             "INSERT OR IGNORE INTO projects
              (id, name, normalized_name, color, created_at, updated_at)
@@ -399,6 +403,16 @@ mod tests {
             ("ŽLUTÝ Kůň".to_string(), "žlutý kůň".to_string())
         );
         assert!(ProjectRepository::normalize_name(" \t ").is_err());
+    }
+
+    #[test]
+    fn project_color_assignment_is_deterministic_without_database_state() {
+        assert_eq!(
+            ProjectRepository::color_for_id("project-a"),
+            ProjectRepository::color_for_id("project-a")
+        );
+        assert!(ProjectRepository::allowed_colors()
+            .contains(&ProjectRepository::color_for_id("project-b")));
     }
 
     #[tokio::test]
