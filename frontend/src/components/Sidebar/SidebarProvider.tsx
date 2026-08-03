@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { projectService } from '@/services/projectService';
 import type { MeetingProjectView, Project } from '@/types/projects';
 import { filterMeetingsForProjectView } from '@/lib/meeting-projects';
+import type { ProjectColorKey } from '@/lib/project-colors';
 
 
 interface SidebarItem {
@@ -72,6 +73,7 @@ interface SidebarContextType {
   removeProject: (meetingId: string, projectId: string) => Promise<void>;
   createAndAssignProject: (meetingId: string, name: string) => Promise<Project>;
   renameProject: (projectId: string, name: string) => Promise<void>;
+  updateProjectColor: (projectId: string, color: ProjectColorKey) => Promise<void>;
   deleteProject: (projectId: string) => Promise<void>;
 
 }
@@ -419,6 +421,47 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, [meetings, projects]);
 
+  const updateProjectColor = React.useCallback(async (projectId: string, color: ProjectColorKey) => {
+    const previousProjects = projects;
+    const previousMeetings = meetings;
+    const previousCurrentMeeting = currentMeeting;
+    const applyColor = (project: Project) => project.id === projectId ? { ...project, color } : project;
+
+    setProjects((current) => current.map(applyColor));
+    setMeetings((current) => current.map((meeting) => ({
+      ...meeting,
+      projects: (meeting.projects ?? []).map(applyColor),
+    })));
+    setCurrentMeeting((current) => current ? {
+      ...current,
+      projects: (current.projects ?? []).map(applyColor),
+    } : current);
+
+    try {
+      const updated = await projectService.updateColor(projectId, color);
+      const applyUpdated = (project: Project) => project.id === projectId
+        ? { ...project, color: updated.color }
+        : project;
+      setProjects((current) => current.map(applyUpdated));
+      setMeetings((current) => current.map((meeting) => ({
+        ...meeting,
+        projects: (meeting.projects ?? []).map(applyUpdated),
+      })));
+      setCurrentMeeting((current) => current ? {
+        ...current,
+        projects: (current.projects ?? []).map(applyUpdated),
+      } : current);
+    } catch (error) {
+      setProjects(previousProjects);
+      setMeetings(previousMeetings);
+      setCurrentMeeting(previousCurrentMeeting);
+      toast.error('Project color update failed', {
+        description: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }, [currentMeeting, meetings, projects]);
+
   const deleteProject = React.useCallback(async (projectId: string) => {
     const previousProjects = projects;
     const previousMeetings = meetings;
@@ -485,6 +528,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       removeProject,
       createAndAssignProject,
       renameProject,
+      updateProjectColor,
       deleteProject,
 
     }}>

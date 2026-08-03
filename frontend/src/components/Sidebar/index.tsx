@@ -91,6 +91,7 @@ const Sidebar: React.FC = () => {
     removeProject,
     createAndAssignProject,
     renameProject,
+    updateProjectColor,
     deleteProject,
   } = useSidebar();
 
@@ -945,7 +946,12 @@ const Sidebar: React.FC = () => {
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-1">
                       <ProjectChips
-                        projects={recording.projects ?? []}
+                        projects={(recording.projects ?? []).map((recordingProject) => {
+                          const canonicalProject = projects.find((project) => project.id === recordingProject.id);
+                          return canonicalProject
+                            ? { ...recordingProject, color: canonicalProject.color }
+                            : recordingProject;
+                        })}
                         onRemove={(project) => transcribeLater.removeProject(recording, project.id)}
                       />
                       <ProjectPicker
@@ -1107,6 +1113,7 @@ const Sidebar: React.FC = () => {
                         onRetry={refetchProjects}
                         onRename={openProjectRename}
                         onDelete={(project) => setProjectDialog({ mode: 'delete', project })}
+                        onColorChange={(project, color) => updateProjectColor(project.id, color)}
                       />
                     </div>
                     <div className="mx-3 mt-1">

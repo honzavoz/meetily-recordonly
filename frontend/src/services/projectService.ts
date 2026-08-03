@@ -5,6 +5,7 @@ interface ProjectPayload {
   id: string;
   name: string;
   normalized_name: string;
+  color?: string;
   created_at?: string;
   updated_at?: string;
   meeting_count?: number;
@@ -24,6 +25,7 @@ function mapProject(project: ProjectPayload): Project {
     id: project.id,
     name: project.name,
     normalizedName: project.normalized_name,
+    color: project.color ?? 'blue',
     createdAt: project.created_at,
     updatedAt: project.updated_at,
     meetingCount: project.meeting_count,
@@ -64,6 +66,13 @@ export const projectService = {
     return mapProject(await invoke<ProjectPayload>('api_rename_project', {
       projectId,
       name: requireName(name),
+    }));
+  },
+
+  async updateColor(projectId: string, color: string): Promise<Project> {
+    return mapProject(await invoke<ProjectPayload>('api_update_project_color', {
+      projectId,
+      color,
     }));
   },
 

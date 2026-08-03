@@ -1,8 +1,10 @@
 'use client';
 
-import { Folder, Inbox, Layers3, Pencil, RotateCw, Trash2 } from 'lucide-react';
+import { Inbox, Layers3, Pencil, RotateCw, Trash2 } from 'lucide-react';
 import type { MeetingProjectView, Project, ProjectMeeting } from '@/types/projects';
 import { getProjectViewCount } from '@/lib/meeting-projects';
+import { ProjectColorPicker } from '@/components/Projects/ProjectColorPicker';
+import type { ProjectColorKey } from '@/lib/project-colors';
 
 export function ProjectSidebarNavigation({
   meetings,
@@ -14,6 +16,7 @@ export function ProjectSidebarNavigation({
   onRetry,
   onRename,
   onDelete,
+  onColorChange,
 }: {
   meetings: ProjectMeeting[];
   projects: Project[];
@@ -24,6 +27,7 @@ export function ProjectSidebarNavigation({
   onRetry: () => void;
   onRename: (project: Project) => void;
   onDelete: (project: Project) => void;
+  onColorChange: (project: Project, color: ProjectColorKey) => Promise<void> | void;
 }) {
   const rowClass = (active: boolean) => `group flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${active ? 'bg-blue-50 font-semibold text-blue-700' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`;
 
@@ -58,11 +62,11 @@ export function ProjectSidebarNavigation({
 
       {projects.map((project) => (
         <div key={project.id} className="group/project flex items-center">
+          <ProjectColorPicker project={project} onChange={(color) => onColorChange(project, color)} />
           <button
             className={`${rowClass(activeView.type === 'project' && activeView.projectId === project.id)} min-w-0 flex-1`}
             onClick={() => onSelect({ type: 'project', projectId: project.id })}
           >
-            <Folder className="h-3.5 w-3.5" />
             <span className="min-w-0 flex-1 truncate">{project.name}</span>
             <span className="text-[11px] tabular-nums text-gray-400">{project.meetingCount ?? 0}</span>
           </button>

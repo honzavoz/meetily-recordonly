@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Check, FolderPlus, Plus } from 'lucide-react';
+import { Check, Plus } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Command,
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/command';
 import { normalizeProjectName } from '@/lib/meeting-projects';
 import type { Project } from '@/types/projects';
+import { getProjectColor } from '@/lib/project-colors';
 
 interface ProjectPickerProps {
   projects: Project[];
@@ -78,6 +79,7 @@ export function ProjectPicker({
             <CommandGroup heading="Projects">
               {projects.map((project) => {
                 const isAssigned = assigned.has(project.id);
+                const color = getProjectColor(project.color);
                 return (
                   <CommandItem
                     key={project.id}
@@ -86,9 +88,7 @@ export function ProjectPicker({
                     onSelect={() => finish(() => onSelect(project))}
                     className="rounded-lg py-2"
                   >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-50 text-blue-600">
-                      <FolderPlus className="h-3.5 w-3.5" />
-                    </span>
+                    <span className={`h-3 w-3 rounded-full ${color.dotClass}`} />
                     <span className="min-w-0 flex-1 truncate">{project.name}</span>
                     {isAssigned && <Check className="h-4 w-4 text-emerald-600" />}
                     {!isAssigned && project.meetingCount !== undefined && (
