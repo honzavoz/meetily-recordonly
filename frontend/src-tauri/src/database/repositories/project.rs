@@ -20,13 +20,6 @@ impl ProjectRepository {
         &Self::COLORS
     }
 
-    fn color_for_id(id: &str) -> &'static str {
-        let hash = id.bytes().fold(0usize, |value, byte| {
-            value.wrapping_mul(31).wrapping_add(byte as usize)
-        });
-        Self::COLORS[hash % Self::COLORS.len()]
-    }
-
     pub fn normalize_name(name: &str) -> Result<(String, String), SqlxError> {
         let display_name = name.split_whitespace().collect::<Vec<_>>().join(" ");
         if display_name.is_empty() {
@@ -83,16 +76,26 @@ impl ProjectRepository {
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().naive_utc();
-        let color = Self::color_for_id(&id);
         let insert = sqlx::query(
             "INSERT OR IGNORE INTO projects
              (id, name, normalized_name, color, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?)",
+             SELECT ?, ?, ?,
+               CASE COUNT(*) % 8
+                 WHEN 0 THEN 'blue'
+                 WHEN 1 THEN 'violet'
+                 WHEN 2 THEN 'emerald'
+                 WHEN 3 THEN 'amber'
+                 WHEN 4 THEN 'rose'
+                 WHEN 5 THEN 'cyan'
+                 WHEN 6 THEN 'orange'
+                 ELSE 'slate'
+               END,
+               ?, ?
+             FROM projects",
         )
         .bind(&id)
         .bind(&display_name)
         .bind(&normalized_name)
-        .bind(color)
         .bind(now)
         .bind(now)
         .execute(pool)
@@ -405,16 +408,6 @@ mod tests {
         assert!(ProjectRepository::normalize_name(" \t ").is_err());
     }
 
-    #[test]
-    fn project_color_assignment_is_deterministic_without_database_state() {
-        assert_eq!(
-            ProjectRepository::color_for_id("project-a"),
-            ProjectRepository::color_for_id("project-a")
-        );
-        assert!(ProjectRepository::allowed_colors()
-            .contains(&ProjectRepository::color_for_id("project-b")));
-    }
-
     #[tokio::test]
     async fn create_returns_existing_normalized_project() {
         let pool = test_pool().await;
@@ -426,6 +419,29 @@ mod tests {
             .unwrap();
         assert_eq!(first.id, duplicate.id);
         assert_eq!(duplicate.name, "YachtNet");
+    }
+
+    #[tokio::test]
+    async fn new_projects_rotate_through_the_complete_palette() {
+        let pool = test_pool().await;
+        let mut colors = Vec::new();
+
+        for index in 0..ProjectRepository::allowed_colors().len() {
+            colors.push(
+                ProjectRepository::create_or_get(&pool, &format!("Project {}", index))
+                    .await
+                    .unwrap()
+                    .color,
+            );
+        }
+
+        assert_eq!(
+            colors,
+            ProjectRepository::allowed_colors()
+                .iter()
+                .map(|color| color.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
