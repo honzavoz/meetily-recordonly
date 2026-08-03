@@ -55,6 +55,12 @@ pub struct RecordingProject {
     pub id: String,
     pub name: String,
     pub normalized_name: String,
+    #[serde(default = "default_project_color")]
+    pub color: String,
+}
+
+fn default_project_color() -> String {
+    "blue".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -367,6 +373,7 @@ async fn transfer_recording_projects(
             id: project.id,
             name: project.name,
             normalized_name: project.normalized_name,
+            color: project.color,
         });
     }
 
@@ -692,6 +699,7 @@ pub async fn assign_transcribe_later_recording_project<R: Runtime>(
             id: project.id,
             name: project.name,
             normalized_name: project.normalized_name,
+            color: project.color,
         },
     )
     .await
@@ -784,7 +792,20 @@ mod recording_projects_tests {
             id: id.to_string(),
             name: name.to_string(),
             normalized_name: name.to_lowercase(),
+            color: "blue".to_string(),
         }
+    }
+
+    #[test]
+    fn older_recording_project_metadata_defaults_to_blue() {
+        let project: RecordingProject = serde_json::from_value(json!({
+            "id": "project-1",
+            "name": "YachtNet",
+            "normalizedName": "yachtnet"
+        }))
+        .unwrap();
+
+        assert_eq!(project.color, "blue");
     }
 
     #[test]
@@ -917,7 +938,7 @@ mod recording_projects_tests {
             .unwrap();
         for statement in [
             "CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, folder_path TEXT)",
-            "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized_name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+            "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized_name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT 'blue', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
             "CREATE TABLE meeting_projects (meeting_id TEXT NOT NULL, project_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (meeting_id, project_id), FOREIGN KEY (meeting_id) REFERENCES meetings(id), FOREIGN KEY (project_id) REFERENCES projects(id))",
         ] {
             sqlx::query(statement).execute(&pool).await.unwrap();
@@ -941,11 +962,13 @@ mod recording_projects_tests {
                     id: first.id,
                     name: first.name,
                     normalized_name: first.normalized_name,
+                    color: first.color,
                 },
                 RecordingProject {
                     id: second.id,
                     name: second.name,
                     normalized_name: second.normalized_name,
+                    color: second.color,
                 },
                 project("deleted-project", "Deleted"),
             ],

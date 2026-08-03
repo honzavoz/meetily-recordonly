@@ -635,6 +635,7 @@ pub fn run() {
             api::api_search_projects,
             api::api_create_project,
             api::api_rename_project,
+            api::api_update_project_color,
             api::api_delete_project,
             api::api_get_meeting_projects,
             api::api_assign_meeting_project,

@@ -12,6 +12,14 @@ pub enum MeetingProjectFilter<'a> {
 pub struct ProjectRepository;
 
 impl ProjectRepository {
+    const COLORS: [&'static str; 8] = [
+        "blue", "violet", "emerald", "amber", "rose", "cyan", "orange", "slate",
+    ];
+
+    pub fn allowed_colors() -> &'static [&'static str] {
+        &Self::COLORS
+    }
+
     pub fn normalize_name(name: &str) -> Result<(String, String), SqlxError> {
         let display_name = name.split_whitespace().collect::<Vec<_>>().join(" ");
         if display_name.is_empty() {
@@ -25,11 +33,11 @@ impl ProjectRepository {
 
     pub async fn list(pool: &SqlitePool) -> Result<Vec<ProjectWithCount>, SqlxError> {
         sqlx::query_as::<_, ProjectWithCount>(
-            "SELECT p.id, p.name, p.normalized_name, p.created_at, p.updated_at,
+            "SELECT p.id, p.name, p.normalized_name, p.color, p.created_at, p.updated_at,
                     COUNT(mp.meeting_id) AS meeting_count
              FROM projects p
              LEFT JOIN meeting_projects mp ON mp.project_id = p.id
-             GROUP BY p.id, p.name, p.normalized_name, p.created_at, p.updated_at
+             GROUP BY p.id, p.name, p.normalized_name, p.color, p.created_at, p.updated_at
              ORDER BY p.name COLLATE NOCASE ASC",
         )
         .fetch_all(pool)
@@ -47,12 +55,12 @@ impl ProjectRepository {
             .to_lowercase();
         let pattern = format!("%{}%", normalized_query);
         sqlx::query_as::<_, ProjectWithCount>(
-            "SELECT p.id, p.name, p.normalized_name, p.created_at, p.updated_at,
+            "SELECT p.id, p.name, p.normalized_name, p.color, p.created_at, p.updated_at,
                     COUNT(mp.meeting_id) AS meeting_count
              FROM projects p
              LEFT JOIN meeting_projects mp ON mp.project_id = p.id
              WHERE p.normalized_name LIKE ?
-             GROUP BY p.id, p.name, p.normalized_name, p.created_at, p.updated_at
+             GROUP BY p.id, p.name, p.normalized_name, p.color, p.created_at, p.updated_at
              ORDER BY p.name COLLATE NOCASE ASC",
         )
         .bind(pattern)
@@ -68,14 +76,19 @@ impl ProjectRepository {
 
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().naive_utc();
+        let project_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+            .fetch_one(pool)
+            .await?;
+        let color = Self::COLORS[project_count.rem_euclid(Self::COLORS.len() as i64) as usize];
         let insert = sqlx::query(
             "INSERT OR IGNORE INTO projects
-             (id, name, normalized_name, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?)",
+             (id, name, normalized_name, color, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&display_name)
         .bind(&normalized_name)
+        .bind(color)
         .bind(now)
         .bind(now)
         .execute(pool)
@@ -135,13 +148,37 @@ impl ProjectRepository {
         Ok(())
     }
 
+    pub async fn update_color(
+        pool: &SqlitePool,
+        project_id: &str,
+        color: &str,
+    ) -> Result<ProjectModel, SqlxError> {
+        if !Self::COLORS.contains(&color) {
+            return Err(SqlxError::Protocol(format!(
+                "unsupported project color '{}'",
+                color
+            )));
+        }
+        Self::require_project(pool, project_id).await?;
+        let now = Utc::now().naive_utc();
+        sqlx::query("UPDATE projects SET color = ?, updated_at = ? WHERE id = ?")
+            .bind(color)
+            .bind(now)
+            .bind(project_id)
+            .execute(pool)
+            .await?;
+        Self::get(pool, project_id)
+            .await?
+            .ok_or(SqlxError::RowNotFound)
+    }
+
     pub async fn list_for_meeting(
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<Vec<ProjectModel>, SqlxError> {
         Self::require_meeting(pool, meeting_id).await?;
         sqlx::query_as::<_, ProjectModel>(
-            "SELECT p.id, p.name, p.normalized_name, p.created_at, p.updated_at
+            "SELECT p.id, p.name, p.normalized_name, p.color, p.created_at, p.updated_at
              FROM projects p
              INNER JOIN meeting_projects mp ON mp.project_id = p.id
              WHERE mp.meeting_id = ?
@@ -252,7 +289,7 @@ impl ProjectRepository {
         project_id: &str,
     ) -> Result<Option<ProjectModel>, SqlxError> {
         sqlx::query_as::<_, ProjectModel>(
-            "SELECT id, name, normalized_name, created_at, updated_at FROM projects WHERE id = ?",
+            "SELECT id, name, normalized_name, color, created_at, updated_at FROM projects WHERE id = ?",
         )
         .bind(project_id)
         .fetch_optional(pool)
@@ -264,7 +301,7 @@ impl ProjectRepository {
         normalized_name: &str,
     ) -> Result<Option<ProjectModel>, SqlxError> {
         sqlx::query_as::<_, ProjectModel>(
-            "SELECT id, name, normalized_name, created_at, updated_at
+            "SELECT id, name, normalized_name, color, created_at, updated_at
              FROM projects WHERE normalized_name = ?",
         )
         .bind(normalized_name)
@@ -329,7 +366,7 @@ mod tests {
              )",
             "CREATE TABLE projects (
                id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL,
-               normalized_name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
+               normalized_name TEXT NOT NULL UNIQUE, color TEXT NOT NULL DEFAULT 'blue', created_at TEXT NOT NULL,
                updated_at TEXT NOT NULL
              )",
             "CREATE TABLE meeting_projects (
@@ -375,6 +412,27 @@ mod tests {
             .unwrap();
         assert_eq!(first.id, duplicate.id);
         assert_eq!(duplicate.name, "YachtNet");
+    }
+
+    #[tokio::test]
+    async fn project_colors_use_palette_defaults_and_reject_unknown_values() {
+        let pool = test_pool().await;
+        let project = ProjectRepository::create_or_get(&pool, "YachtNet")
+            .await
+            .unwrap();
+
+        assert!(ProjectRepository::allowed_colors().contains(&project.color.as_str()));
+
+        let updated = ProjectRepository::update_color(&pool, &project.id, "emerald")
+            .await
+            .unwrap();
+        assert_eq!(updated.color, "emerald");
+
+        assert!(
+            ProjectRepository::update_color(&pool, &project.id, "#00ff00")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

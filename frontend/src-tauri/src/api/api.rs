@@ -406,6 +406,21 @@ pub async fn api_rename_project<R: Runtime>(
 }
 
 #[tauri::command]
+pub async fn api_update_project_color<R: Runtime>(
+    _app: AppHandle<R>,
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+    color: String,
+) -> Result<ProjectModel, String> {
+    ProjectRepository::update_color(state.db_manager.pool(), &project_id, &color)
+        .await
+        .map_err(|error| match error {
+            sqlx::Error::RowNotFound => format!("Project not found: {}", project_id),
+            other => format!("Failed to update project color: {}", other),
+        })
+}
+
+#[tauri::command]
 pub async fn api_delete_project<R: Runtime>(
     _app: AppHandle<R>,
     state: tauri::State<'_, AppState>,
