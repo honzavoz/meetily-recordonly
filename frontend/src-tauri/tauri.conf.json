@@ -1,7 +1,7 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-    "productName": "Meetily Record Only - Transcribe Later",
-    "version": "0.4.3",
+    "productName": "Meetily",
+    "version": "0.4.4",
     "identifier": "cz.honzavoz.meetily.recordonly",
     "build": {
         "frontendDist": "../out",
@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "Meetily Record Only - Transcribe Later",
+                "title": "Meetily",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,
