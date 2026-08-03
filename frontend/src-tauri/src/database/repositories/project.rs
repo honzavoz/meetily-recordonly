@@ -247,7 +247,10 @@ impl ProjectRepository {
         Ok(result)
     }
 
-    async fn get(pool: &SqlitePool, project_id: &str) -> Result<Option<ProjectModel>, SqlxError> {
+    pub async fn get(
+        pool: &SqlitePool,
+        project_id: &str,
+    ) -> Result<Option<ProjectModel>, SqlxError> {
         sqlx::query_as::<_, ProjectModel>(
             "SELECT id, name, normalized_name, created_at, updated_at FROM projects WHERE id = ?",
         )

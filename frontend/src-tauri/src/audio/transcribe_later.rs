@@ -1,15 +1,21 @@
 use super::constants::AUDIO_EXTENSIONS;
 use super::import::extract_duration_from_metadata;
 use super::recording_preferences::load_recording_preferences;
+use crate::database::repositories::project::ProjectRepository;
+use crate::state::AppState;
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Manager, Runtime};
 
 const INDEX_FILE_NAME: &str = "transcribe_later_index.json";
+const METADATA_FILE_NAME: &str = "metadata.json";
+static RECORDING_METADATA_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -41,6 +47,15 @@ pub struct TranscribeLaterRecording {
     pub duration_seconds: Option<f64>,
     pub status: TranscribeLaterStatus,
     pub index_entry: Option<TranscribeLaterIndexEntry>,
+    pub projects: Vec<RecordingProject>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingProject {
+    pub id: String,
+    pub name: String,
+    pub normalized_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -168,6 +183,147 @@ fn read_recording_duration_seconds(folder_path: &Path) -> Option<f64> {
         .filter(|duration| duration.is_finite() && *duration > 0.0)
 }
 
+fn ensure_recording_folder(folder_path: &Path) -> Result<(), String> {
+    if !folder_path.exists() || !folder_path.is_dir() {
+        return Err("Recording folder no longer exists".to_string());
+    }
+    Ok(())
+}
+
+fn read_recording_metadata(folder_path: &Path) -> Result<serde_json::Value, String> {
+    ensure_recording_folder(folder_path)?;
+    let metadata_path = folder_path.join(METADATA_FILE_NAME);
+    if !metadata_path.exists() {
+        return Ok(serde_json::Value::Object(serde_json::Map::new()));
+    }
+
+    let raw = fs::read_to_string(&metadata_path)
+        .map_err(|error| format!("Failed to read recording metadata: {}", error))?;
+    let value: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|error| format!("Failed to parse recording metadata: {}", error))?;
+    if !value.is_object() {
+        return Err("Failed to parse recording metadata: root must be an object".to_string());
+    }
+    Ok(value)
+}
+
+fn read_recording_projects(folder_path: &Path) -> Result<Vec<RecordingProject>, String> {
+    let metadata = read_recording_metadata(folder_path)?;
+    let parsed_projects = metadata
+        .get("projects")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|value| serde_json::from_value::<RecordingProject>(value.clone()).ok())
+        .filter(|project| {
+            !project.id.trim().is_empty()
+                && !project.name.trim().is_empty()
+                && !project.normalized_name.trim().is_empty()
+        })
+        .collect::<Vec<_>>();
+    let mut projects = parsed_projects
+        .into_iter()
+        .map(|project| (project.id.clone(), project))
+        .collect::<HashMap<_, _>>()
+        .into_values()
+        .collect::<Vec<_>>();
+    projects.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(projects)
+}
+
+fn write_recording_projects(
+    folder_path: &Path,
+    projects: &[RecordingProject],
+) -> Result<(), String> {
+    let _guard = RECORDING_METADATA_WRITE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut metadata = read_recording_metadata(folder_path)?;
+    let object = metadata
+        .as_object_mut()
+        .ok_or_else(|| "Failed to parse recording metadata: root must be an object".to_string())?;
+    object.insert(
+        "projects".to_string(),
+        serde_json::to_value(projects)
+            .map_err(|error| format!("Failed to serialize recording projects: {}", error))?,
+    );
+
+    let metadata_path = folder_path.join(METADATA_FILE_NAME);
+    let temporary_path = folder_path.join(format!(".metadata.json.{}.tmp", uuid::Uuid::new_v4()));
+    let raw = serde_json::to_string_pretty(&metadata)
+        .map_err(|error| format!("Failed to serialize recording metadata: {}", error))?;
+    fs::write(&temporary_path, raw)
+        .map_err(|error| format!("Failed to write recording metadata: {}", error))?;
+    fs::rename(&temporary_path, &metadata_path)
+        .map_err(|error| format!("Failed to replace recording metadata: {}", error))
+}
+
+fn assign_recording_project(
+    folder_path: &Path,
+    project: RecordingProject,
+) -> Result<Vec<RecordingProject>, String> {
+    let mut projects = read_recording_projects(folder_path)?;
+    if let Some(existing) = projects
+        .iter_mut()
+        .find(|existing| existing.id == project.id)
+    {
+        *existing = project;
+    } else {
+        projects.push(project);
+    }
+    projects.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    write_recording_projects(folder_path, &projects)?;
+    Ok(projects)
+}
+
+fn remove_recording_project(
+    folder_path: &Path,
+    project_id: &str,
+) -> Result<Vec<RecordingProject>, String> {
+    let mut projects = read_recording_projects(folder_path)?;
+    projects.retain(|project| project.id != project_id);
+    write_recording_projects(folder_path, &projects)?;
+    Ok(projects)
+}
+
+async fn transfer_recording_projects(
+    pool: &SqlitePool,
+    folder_path: &Path,
+    meeting_id: &str,
+) -> Result<Vec<RecordingProject>, String> {
+    ProjectRepository::list_for_meeting(pool, meeting_id)
+        .await
+        .map_err(|error| format!("Failed to validate target meeting: {}", error))?;
+    let stored_projects = read_recording_projects(folder_path)?;
+    let mut valid_projects = Vec::with_capacity(stored_projects.len());
+
+    for stored in stored_projects {
+        let Some(project) = ProjectRepository::get(pool, &stored.id)
+            .await
+            .map_err(|error| format!("Failed to load recording project: {}", error))?
+        else {
+            continue;
+        };
+        ProjectRepository::assign(pool, meeting_id, &project.id)
+            .await
+            .map_err(|error| format!("Failed to transfer recording project: {}", error))?;
+        valid_projects.push(RecordingProject {
+            id: project.id,
+            name: project.name,
+            normalized_name: project.normalized_name,
+        });
+    }
+
+    valid_projects.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    write_recording_projects(folder_path, &valid_projects)?;
+    Ok(valid_projects)
+}
+
 fn read_audio_duration_seconds(audio_path: &Path) -> Option<f64> {
     extract_duration_from_metadata(audio_path)
         .ok()
@@ -242,6 +398,14 @@ fn scan_recordings_folder(
                     .or_else(|| read_audio_duration_seconds(&audio_path)),
                 status: TranscribeLaterStatus::Pending,
                 index_entry,
+                projects: read_recording_projects(&folder_path).unwrap_or_else(|error| {
+                    warn!(
+                        "Failed to read projects for pending recording {}: {}",
+                        folder_path.display(),
+                        error
+                    );
+                    Vec::new()
+                }),
             };
 
             if let Some(entry) = &recording.index_entry {
@@ -382,9 +546,8 @@ fn update_metadata_after_rename(
 
     let raw = fs::read_to_string(&metadata_path)
         .map_err(|e| format!("Failed to read recording metadata: {}", e))?;
-    let mut value = serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(|_| {
-        serde_json::json!({})
-    });
+    let mut value =
+        serde_json::from_str::<serde_json::Value>(&raw).unwrap_or_else(|_| serde_json::json!({}));
 
     if !value.is_object() {
         value = serde_json::json!({});
@@ -444,8 +607,53 @@ pub async fn list_pending_recordings_to_transcribe<R: Runtime>(
 
     let index = read_index(&app);
     let recordings = scan_recordings_folder(&preferences.save_folder, &index);
-    info!("Found {} recordings pending transcription", recordings.len());
+    info!(
+        "Found {} recordings pending transcription",
+        recordings.len()
+    );
     Ok(recordings)
+}
+
+#[tauri::command]
+pub async fn assign_transcribe_later_recording_project(
+    folder_path: String,
+    project_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RecordingProject>, String> {
+    let project = ProjectRepository::get(state.db_manager.pool(), &project_id)
+        .await
+        .map_err(|error| format!("Failed to load project: {}", error))?
+        .ok_or_else(|| "Project not found".to_string())?;
+    assign_recording_project(
+        Path::new(&folder_path),
+        RecordingProject {
+            id: project.id,
+            name: project.name,
+            normalized_name: project.normalized_name,
+        },
+    )
+}
+
+#[tauri::command]
+pub async fn remove_transcribe_later_recording_project(
+    folder_path: String,
+    project_id: String,
+) -> Result<Vec<RecordingProject>, String> {
+    remove_recording_project(Path::new(&folder_path), &project_id)
+}
+
+#[tauri::command]
+pub async fn transfer_transcribe_later_recording_projects(
+    folder_path: String,
+    meeting_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<RecordingProject>, String> {
+    transfer_recording_projects(
+        state.db_manager.pool(),
+        Path::new(&folder_path),
+        &meeting_id,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -500,14 +708,175 @@ pub async fn play_transcribe_later_recording(audio_path: String) -> Result<(), S
     open_path_with_system(&audio_path)
 }
 
+#[cfg(test)]
+mod recording_projects_tests {
+    use super::*;
+    use crate::database::repositories::project::ProjectRepository;
+    use serde_json::json;
+    use sqlx::sqlite::SqlitePoolOptions;
+    use tempfile::tempdir;
+
+    fn project(id: &str, name: &str) -> RecordingProject {
+        RecordingProject {
+            id: id.to_string(),
+            name: name.to_string(),
+            normalized_name: name.to_lowercase(),
+        }
+    }
+
+    #[test]
+    fn recording_projects_preserve_metadata_and_are_idempotent() {
+        let recording = tempdir().unwrap();
+        fs::write(
+            recording.path().join("metadata.json"),
+            serde_json::to_vec_pretty(&json!({
+                "custom_field": "preserved",
+                "duration_seconds": 12.5
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let assigned = project("project-1", "Povolstav");
+        assign_recording_project(recording.path(), assigned.clone()).unwrap();
+        assign_recording_project(recording.path(), assigned.clone()).unwrap();
+
+        assert_eq!(
+            read_recording_projects(recording.path()).unwrap(),
+            vec![assigned]
+        );
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(recording.path().join("metadata.json")).unwrap())
+                .unwrap();
+        assert_eq!(saved["custom_field"], json!("preserved"));
+        assert_eq!(saved["duration_seconds"], json!(12.5));
+        assert_eq!(saved["projects"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recording_projects_are_sorted_and_removable() {
+        let recording = tempdir().unwrap();
+        assign_recording_project(recording.path(), project("z", "Yachtnet")).unwrap();
+        assign_recording_project(recording.path(), project("a", "Optimum Cars")).unwrap();
+
+        assert_eq!(
+            read_recording_projects(recording.path())
+                .unwrap()
+                .into_iter()
+                .map(|item| item.name)
+                .collect::<Vec<_>>(),
+            vec!["Optimum Cars", "Yachtnet"]
+        );
+
+        remove_recording_project(recording.path(), "a").unwrap();
+        assert_eq!(
+            read_recording_projects(recording.path()).unwrap(),
+            vec![project("z", "Yachtnet")]
+        );
+    }
+
+    #[test]
+    fn recording_projects_ignore_malformed_entries() {
+        let recording = tempdir().unwrap();
+        fs::write(
+            recording.path().join("metadata.json"),
+            serde_json::to_vec_pretty(&json!({
+                "projects": [
+                    { "id": "valid", "name": "Valid", "normalizedName": "valid" },
+                    { "id": 42, "name": false },
+                    null
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_recording_projects(recording.path()).unwrap(),
+            vec![project("valid", "Valid")]
+        );
+    }
+
+    #[test]
+    fn recording_projects_reject_non_directory_targets() {
+        let recording = tempdir().unwrap();
+        let file = recording.path().join("audio.mp4");
+        fs::write(&file, b"audio").unwrap();
+
+        let error = assign_recording_project(&file, project("p", "Project")).unwrap_err();
+        assert!(error.contains("Recording folder no longer exists"));
+    }
+
+    #[tokio::test]
+    async fn recording_projects_transfer_valid_projects_once_and_drop_stale_references() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        for statement in [
+            "CREATE TABLE meetings (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, folder_path TEXT)",
+            "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, normalized_name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)",
+            "CREATE TABLE meeting_projects (meeting_id TEXT NOT NULL, project_id TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (meeting_id, project_id), FOREIGN KEY (meeting_id) REFERENCES meetings(id), FOREIGN KEY (project_id) REFERENCES projects(id))",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
+        sqlx::query("INSERT INTO meetings (id, title, created_at, updated_at) VALUES ('meeting-1', 'Meeting', '2026-08-03T00:00:00', '2026-08-03T00:00:00')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let first = ProjectRepository::create_or_get(&pool, "Povolstav")
+            .await
+            .unwrap();
+        let second = ProjectRepository::create_or_get(&pool, "Yachtnet")
+            .await
+            .unwrap();
+
+        let recording = tempdir().unwrap();
+        write_recording_projects(
+            recording.path(),
+            &[
+                RecordingProject {
+                    id: first.id,
+                    name: first.name,
+                    normalized_name: first.normalized_name,
+                },
+                RecordingProject {
+                    id: second.id,
+                    name: second.name,
+                    normalized_name: second.normalized_name,
+                },
+                project("deleted-project", "Deleted"),
+            ],
+        )
+        .unwrap();
+
+        let transferred = transfer_recording_projects(&pool, recording.path(), "meeting-1")
+            .await
+            .unwrap();
+        transfer_recording_projects(&pool, recording.path(), "meeting-1")
+            .await
+            .unwrap();
+
+        assert_eq!(transferred.len(), 2);
+        assert_eq!(
+            ProjectRepository::list_for_meeting(&pool, "meeting-1")
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(read_recording_projects(recording.path()).unwrap().len(), 2);
+    }
+}
+
 #[tauri::command]
 pub async fn delete_transcribe_later_recording(
     folder_path: String,
     audio_path: String,
 ) -> Result<(), String> {
     let folder = ensure_audio_inside_folder(&folder_path, &audio_path)?;
-    fs::remove_dir_all(&folder)
-        .map_err(|e| format!("Failed to delete recording folder: {}", e))
+    fs::remove_dir_all(&folder).map_err(|e| format!("Failed to delete recording folder: {}", e))
 }
 
 #[tauri::command]
