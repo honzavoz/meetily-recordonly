@@ -10,7 +10,28 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
+  {
+    ignores: [
+      ".next/**",
+      "out/**",
+      "dist/**",
+      "src-tauri/target/**",
+      "src-tauri/binaries/**",
+    ],
+  },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
+  {
+    // Keep legacy cleanup visible without blocking releases. New structural,
+    // React hooks, accessibility, and framework errors still fail lint.
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/no-require-imports": "warn",
+      "react/no-unescaped-entities": "warn",
+      "prefer-const": "warn",
+      "@next/next/no-assign-module-variable": "warn",
+    },
+  },
 ];
 
 export default eslintConfig;

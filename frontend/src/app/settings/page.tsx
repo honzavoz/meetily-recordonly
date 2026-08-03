@@ -59,6 +59,11 @@ export default function SettingsPage() {
     if (activeTabElement) {
       const { offsetLeft, offsetWidth } = activeTabElement;
       setUnderlineStyle({ left: offsetLeft, width: offsetWidth });
+      activeTabElement.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'nearest',
+      });
     }
   }, [activeTab]);
 
@@ -66,7 +71,7 @@ export default function SettingsPage() {
     <div className="h-screen bg-gray-50 flex flex-col">
       {/* Fixed Header */}
       <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-8 py-6">
+        <div className="mx-auto w-full max-w-6xl min-w-0 px-3 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-6">
           <div className="flex items-center gap-4">
             <button
               onClick={() => router.back()}
@@ -81,11 +86,12 @@ export default function SettingsPage() {
       </div>
 
       {/* Scrollable Content */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-8 pt-6">
+      <div className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto w-full max-w-6xl min-w-0 px-3 pb-6 pt-4 sm:px-6 sm:pt-5 lg:px-8 lg:pt-6">
           {/* Tabs */}
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="bg-transparent relative rounded-none border-b border-gray-200 p-0 h-auto">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="min-w-0 w-full">
+            <div className="settings-tabs-scroll w-full min-w-0 overflow-x-auto overscroll-x-contain">
+              <TabsList className="relative h-auto min-w-max rounded-none border-b border-gray-200 bg-transparent p-0">
               {TABS.map((tab, index) => {
                 const Icon = tab.icon;
                 return (
@@ -107,24 +113,25 @@ export default function SettingsPage() {
                 style={{ left: underlineStyle.left, width: underlineStyle.width }}
                 transition={{ type: 'spring', stiffness: 400, damping: 40 }}
               />
-            </TabsList>
+              </TabsList>
+            </div>
 
-            <TabsContent value="general">
+            <TabsContent value="general" className="min-w-0 max-w-full">
               <PreferenceSettings />
             </TabsContent>
-            <TabsContent value="recording">
+            <TabsContent value="recording" className="min-w-0 max-w-full">
               <RecordingSettings />
             </TabsContent>
-            <TabsContent value="Transcriptionmodels">
+            <TabsContent value="Transcriptionmodels" className="min-w-0 max-w-full">
               <TranscriptSettings
                 transcriptModelConfig={transcriptModelConfig}
                 setTranscriptModelConfig={setTranscriptModelConfig}
               />
             </TabsContent>
-            <TabsContent value="summaryModels">
+            <TabsContent value="summaryModels" className="min-w-0 max-w-full">
               <SummaryModelSettings />
             </TabsContent>
-            <TabsContent value="beta" className="mt-6">
+            <TabsContent value="beta" className="mt-6 min-w-0 max-w-full">
               <BetaSettings />
             </TabsContent>
           </Tabs>
