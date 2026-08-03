@@ -8,7 +8,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { TranscriptPanel } from '@/components/MeetingDetails/TranscriptPanel';
 import { SummaryPanel } from '@/components/MeetingDetails/SummaryPanel';
+import { MeetingWorkspaceTabs } from '@/components/MeetingDetails/MeetingWorkspaceTabs';
 import { ModelConfig } from '@/components/ModelSettingsModal';
+import {
+  DEFAULT_COMPACT_MEETING_PANE,
+  type CompactMeetingPane,
+} from '@/lib/responsive-meeting-workspace';
 
 // Custom hooks
 import { useMeetingData } from '@/hooks/meeting-details/useMeetingData';
@@ -57,6 +62,9 @@ export default function PageContent({
   const [customPrompt, setCustomPrompt] = useState<string>('');
   const [isRecording] = useState(false);
   const [summaryResponse] = useState<SummaryResponse | null>(null);
+  const [compactPane, setCompactPane] = useState<CompactMeetingPane>(
+    DEFAULT_COMPACT_MEETING_PANE,
+  );
 
   // Ref to store the modal open function from SummaryGeneratorButtonGroup
   const openModelSettingsRef = useRef<(() => void) | null>(null);
@@ -147,6 +155,10 @@ export default function PageContent({
     Analytics.trackPageView('meeting_details');
   }, []);
 
+  useEffect(() => {
+    setCompactPane(DEFAULT_COMPACT_MEETING_PANE);
+  }, [meeting.id]);
+
   // Auto-generate summary when flag is set
   useEffect(() => {
     let cancelled = false;
@@ -178,68 +190,83 @@ export default function PageContent({
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className="flex flex-col h-screen bg-gray-50"
     >
-      <div className="flex flex-1 overflow-hidden">
-        <TranscriptPanel
-          transcripts={meetingData.transcripts}
-          customPrompt={customPrompt}
-          onPromptChange={setCustomPrompt}
-          onCopyTranscript={copyOperations.handleCopyTranscript}
-          onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
-          isRecording={isRecording}
-          disableAutoScroll={true}
-          // Pagination props for efficient loading
-          usePagination={true}
-          segments={segments}
-          hasMore={hasMore}
-          isLoadingMore={isLoadingMore}
-          totalCount={totalCount}
-          loadedCount={loadedCount}
-          onLoadMore={onLoadMore}
-          // Retranscription props
-          meetingId={meeting.id}
-          meetingFolderPath={meeting.folder_path}
-          onRefetchTranscripts={onRefetchTranscripts}
-        />
-        <SummaryPanel
-          meeting={meeting}
-          meetingTitle={meetingData.meetingTitle}
-          onTitleChange={meetingData.handleTitleChange}
-          isEditingTitle={meetingData.isEditingTitle}
-          onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
-          onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
-          isTitleDirty={meetingData.isTitleDirty}
-          summaryRef={meetingData.blockNoteSummaryRef}
-          isSaving={meetingData.isSaving}
-          onSaveAll={meetingData.saveAllChanges}
-          onCopySummary={copyOperations.handleCopySummary}
-          onOpenFolder={meetingOperations.handleOpenMeetingFolder}
-          aiSummary={meetingData.aiSummary}
-          summaryStatus={summaryGeneration.summaryStatus}
-          transcripts={meetingData.transcripts}
-          modelConfig={modelConfig}
-          setModelConfig={setModelConfig}
-          onSaveModelConfig={handleSaveModelConfig}
-          onGenerateSummary={summaryGeneration.handleGenerateSummary}
-          onStopGeneration={summaryGeneration.handleStopGeneration}
-          customPrompt={customPrompt}
-          summaryResponse={summaryResponse}
-          onSaveSummary={meetingData.handleSaveSummary}
-          onSummaryChange={meetingData.handleSummaryChange}
-          onDirtyChange={meetingData.setIsSummaryDirty}
-          summaryError={summaryGeneration.summaryError}
-          onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
-          getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
-          availableTemplates={templates.availableTemplates}
-          selectedTemplate={templates.selectedTemplate}
-          onTemplateSelect={templates.handleTemplateSelection}
-          isModelConfigLoading={false}
-          onOpenModelSettings={handleRegisterModalOpen}
-          projects={meetingProjects}
-          availableProjects={projects}
-          onAssignProject={(project) => assignProject(meeting.id, project)}
-          onCreateProject={(name) => createAndAssignProject(meeting.id, name)}
-          onRemoveProject={(project) => removeProject(meeting.id, project.id)}
-        />
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <MeetingWorkspaceTabs value={compactPane} onChange={setCompactPane} />
+        <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+          <div
+            role="tabpanel"
+            aria-label="Transcript"
+            className={`${compactPane === 'transcript' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 lg:flex lg:max-w-[38%]`}
+          >
+            <TranscriptPanel
+              transcripts={meetingData.transcripts}
+              customPrompt={customPrompt}
+              onPromptChange={setCustomPrompt}
+              onCopyTranscript={copyOperations.handleCopyTranscript}
+              onOpenMeetingFolder={meetingOperations.handleOpenMeetingFolder}
+              isRecording={isRecording}
+              disableAutoScroll={true}
+              // Pagination props for efficient loading
+              usePagination={true}
+              segments={segments}
+              hasMore={hasMore}
+              isLoadingMore={isLoadingMore}
+              totalCount={totalCount}
+              loadedCount={loadedCount}
+              onLoadMore={onLoadMore}
+              // Retranscription props
+              meetingId={meeting.id}
+              meetingFolderPath={meeting.folder_path}
+              onRefetchTranscripts={onRefetchTranscripts}
+            />
+          </div>
+          <div
+            role="tabpanel"
+            aria-label="Summary"
+            className={`${compactPane === 'summary' ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-1 lg:flex`}
+          >
+            <SummaryPanel
+              meeting={meeting}
+              meetingTitle={meetingData.meetingTitle}
+              onTitleChange={meetingData.handleTitleChange}
+              isEditingTitle={meetingData.isEditingTitle}
+              onStartEditTitle={() => meetingData.setIsEditingTitle(true)}
+              onFinishEditTitle={() => meetingData.setIsEditingTitle(false)}
+              isTitleDirty={meetingData.isTitleDirty}
+              summaryRef={meetingData.blockNoteSummaryRef}
+              isSaving={meetingData.isSaving}
+              onSaveAll={meetingData.saveAllChanges}
+              onCopySummary={copyOperations.handleCopySummary}
+              onOpenFolder={meetingOperations.handleOpenMeetingFolder}
+              aiSummary={meetingData.aiSummary}
+              summaryStatus={summaryGeneration.summaryStatus}
+              transcripts={meetingData.transcripts}
+              modelConfig={modelConfig}
+              setModelConfig={setModelConfig}
+              onSaveModelConfig={handleSaveModelConfig}
+              onGenerateSummary={summaryGeneration.handleGenerateSummary}
+              onStopGeneration={summaryGeneration.handleStopGeneration}
+              customPrompt={customPrompt}
+              summaryResponse={summaryResponse}
+              onSaveSummary={meetingData.handleSaveSummary}
+              onSummaryChange={meetingData.handleSummaryChange}
+              onDirtyChange={meetingData.setIsSummaryDirty}
+              summaryError={summaryGeneration.summaryError}
+              onRegenerateSummary={summaryGeneration.handleRegenerateSummary}
+              getSummaryStatusMessage={summaryGeneration.getSummaryStatusMessage}
+              availableTemplates={templates.availableTemplates}
+              selectedTemplate={templates.selectedTemplate}
+              onTemplateSelect={templates.handleTemplateSelection}
+              isModelConfigLoading={false}
+              onOpenModelSettings={handleRegisterModalOpen}
+              projects={meetingProjects}
+              availableProjects={projects}
+              onAssignProject={(project) => assignProject(meeting.id, project)}
+              onCreateProject={(name) => createAndAssignProject(meeting.id, name)}
+              onRemoveProject={(project) => removeProject(meeting.id, project.id)}
+            />
+          </div>
+        </div>
       </div>
     </motion.div>
   );

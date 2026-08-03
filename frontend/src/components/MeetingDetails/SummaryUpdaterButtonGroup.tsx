@@ -13,6 +13,7 @@ interface SummaryUpdaterButtonGroupProps {
   onFind?: () => void;
   onOpenFolder: () => Promise<void>;
   hasSummary: boolean;
+  showCopy?: boolean;
 }
 
 export function SummaryUpdaterButtonGroup({
@@ -22,7 +23,8 @@ export function SummaryUpdaterButtonGroup({
   onCopy,
   onFind,
   onOpenFolder,
-  hasSummary
+  hasSummary,
+  showCopy = true,
 }: SummaryUpdaterButtonGroupProps) {
   return (
     <ButtonGroup>
@@ -41,18 +43,18 @@ export function SummaryUpdaterButtonGroup({
         {isSaving ? (
           <>
             <Loader2 className="animate-spin" />
-            <span className="hidden lg:inline">Saving...</span>
+            <span className="hidden sm:inline">Saving...</span>
           </>
         ) : (
           <>
             <Save />
-            <span className="hidden lg:inline">Save</span>
+            <span className="hidden sm:inline">Save</span>
           </>
         )}
       </Button>
 
       {/* Copy button */}
-      <Button
+      {showCopy && <Button
         variant="outline"
         size="sm"
         title="Copy Summary"
@@ -65,7 +67,7 @@ export function SummaryUpdaterButtonGroup({
       >
         <Copy />
         <span className="hidden lg:inline">Copy</span>
-      </Button>
+      </Button>}
 
       {/* Find button */}
       {/* {onFind && (

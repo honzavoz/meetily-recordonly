@@ -7,6 +7,7 @@ import { EmptyStateSummary } from '@/components/EmptyStateSummary';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { SummaryGeneratorButtonGroup } from './SummaryGeneratorButtonGroup';
 import { SummaryUpdaterButtonGroup } from './SummaryUpdaterButtonGroup';
+import { SummaryActionsOverflow } from './SummaryActionsOverflow';
 import Analytics from '@/lib/analytics';
 import { useEffect, useRef, useState, RefObject } from 'react';
 import { toast } from 'sonner';
@@ -103,7 +104,7 @@ export function SummaryPanel({
   onGenerateSummary,
   onStopGeneration,
   customPrompt,
-  summaryResponse,
+  summaryResponse: _summaryResponse,
   onSaveSummary,
   onSummaryChange,
   onDirtyChange,
@@ -128,6 +129,7 @@ export function SummaryPanel({
   const activeMeetingIdRef = useRef(meeting.id);
   const languageSaveVersionRef = useRef(0);
   const languageSaveLoopRunningRef = useRef(false);
+  const modelSettingsOpenRef = useRef<(() => void) | null>(null);
   const latestLanguageSaveRequestRef = useRef<{
     version: number;
     meetingId: string;
@@ -258,13 +260,13 @@ export function SummaryPanel({
           aria-label="Set summary language"
         >
           <Languages size={18} />
-          <span className="hidden lg:inline">{effectiveLangLabel}</span>
+          <span className="hidden sm:inline">{effectiveLangLabel}</span>
           <ChevronDown size={14} className="text-gray-400" />
         </Button>
       </PopoverTrigger>
       <PopoverContent
         align="end"
-        className="w-auto p-0 border-0 shadow-none bg-transparent"
+        className="w-auto max-w-[calc(100vw-2rem)] border-0 bg-transparent p-0 shadow-none"
       >
         <LanguagePickerPopover
           value={summaryLang}
@@ -289,10 +291,65 @@ export function SummaryPanel({
 
   const selectedExternalPrompt = externalAI.promptPackage?.parts[externalAI.selectedPromptIndex] ?? null;
 
+  const registerModelSettingsOpen = (openFn: () => void) => {
+    modelSettingsOpenRef.current = openFn;
+    onOpenModelSettings?.(openFn);
+  };
+
+  const renderGenerator = (showSecondaryActions: boolean, showLanguage = true) => (
+    <SummaryGeneratorButtonGroup
+      modelConfig={modelConfig}
+      setModelConfig={setModelConfig}
+      onSaveModelConfig={onSaveModelConfig}
+      onGenerateSummary={onGenerateSummary}
+      onStopGeneration={onStopGeneration}
+      customPrompt={customPrompt}
+      summaryStatus={summaryStatus}
+      availableTemplates={availableTemplates}
+      selectedTemplate={selectedTemplate}
+      onTemplateSelect={onTemplateSelect}
+      hasTranscripts={transcripts.length > 0}
+      hasSummary={!!aiSummary}
+      isModelConfigLoading={isModelConfigLoading}
+      isPreparingExternalAI={externalAI.isPreparingPrompt}
+      onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
+      onOpenPasteExternalAI={externalAI.openPasteDialog}
+      onOpenModelSettings={registerModelSettingsOpen}
+      languageSlot={showLanguage && transcripts.length > 0 ? languageSlot : undefined}
+      showSecondaryActions={showSecondaryActions}
+    />
+  );
+
+  const renderUpdater = (showCopy: boolean) => (
+    <SummaryUpdaterButtonGroup
+      isSaving={isSaving}
+      isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
+      onSave={onSaveAll}
+      onCopy={onCopySummary}
+      onOpenFolder={onOpenFolder}
+      hasSummary={!!aiSummary}
+      showCopy={showCopy}
+    />
+  );
+
+  const compactOverflow = (
+    <SummaryActionsOverflow
+      hasSummary={!!aiSummary}
+      templates={availableTemplates}
+      selectedTemplate={selectedTemplate}
+      isPreparingExternalAI={externalAI.isPreparingPrompt}
+      onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
+      onOpenPasteExternalAI={externalAI.openPasteDialog}
+      onOpenModelSettings={() => modelSettingsOpenRef.current?.()}
+      onTemplateSelect={onTemplateSelect}
+      onCopySummary={onCopySummary}
+    />
+  );
+
   return (
-    <div className="flex-1 min-w-0 flex flex-col bg-white overflow-hidden">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
       {/* Title area */}
-      <div className="p-4 border-b border-gray-200">
+      <div className="shrink-0 border-b border-gray-200 p-3 sm:p-4">
         <div className="mb-3 flex flex-col gap-2">
           <EditableTitle
             title={meetingTitle}
@@ -314,72 +371,31 @@ export function SummaryPanel({
 
         {/* Button groups - only show when summary exists */}
         {aiSummary && !isSummaryLoading && (
-          <div className="flex items-center justify-center w-full pt-0 gap-2">
-            {/* Left-aligned: Summary Generator Button Group */}
-            <div className="flex-shrink-0">
-              <SummaryGeneratorButtonGroup
-                modelConfig={modelConfig}
-                setModelConfig={setModelConfig}
-                onSaveModelConfig={onSaveModelConfig}
-                onGenerateSummary={onGenerateSummary}
-                onStopGeneration={onStopGeneration}
-                customPrompt={customPrompt}
-                summaryStatus={summaryStatus}
-                availableTemplates={availableTemplates}
-                selectedTemplate={selectedTemplate}
-                onTemplateSelect={onTemplateSelect}
-                hasTranscripts={transcripts.length > 0}
-                hasSummary={!!aiSummary}
-                isModelConfigLoading={isModelConfigLoading}
-                isPreparingExternalAI={externalAI.isPreparingPrompt}
-                onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
-                onOpenPasteExternalAI={externalAI.openPasteDialog}
-                onOpenModelSettings={onOpenModelSettings}
-                languageSlot={languageSlot}
-              />
+          <div className="min-w-0 pt-0">
+            <div className="hidden min-w-0 flex-wrap items-center justify-center gap-2 lg:flex">
+              {renderGenerator(true)}
+              {renderUpdater(true)}
             </div>
-
-            {/* Right-aligned: Summary Updater Button Group */}
-            <div className="flex-shrink-0">
-              <SummaryUpdaterButtonGroup
-                isSaving={isSaving}
-                isDirty={isTitleDirty || (summaryRef.current?.isDirty || false)}
-                onSave={onSaveAll}
-                onCopy={onCopySummary}
-                onFind={() => {
-                  // TODO: Implement find in summary functionality
-                  console.log('Find in summary clicked');
-                }}
-                onOpenFolder={onOpenFolder}
-                hasSummary={!!aiSummary}
-              />
+            <div className="flex min-w-0 items-center justify-between gap-2 lg:hidden">
+              <div className="min-w-0">{renderGenerator(false)}</div>
+              <div className="flex shrink-0 items-center gap-2">
+                {renderUpdater(false)}
+                {compactOverflow}
+              </div>
             </div>
           </div>
         )}
       </div>
 
       {isSummaryLoading ? (
-        <div className="flex flex-col h-full">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* Show button group during generation */}
-          <div className="flex items-center justify-center pt-8 pb-4">
-            <SummaryGeneratorButtonGroup
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
-              onStopGeneration={onStopGeneration}
-              customPrompt={customPrompt}
-              summaryStatus={summaryStatus}
-              availableTemplates={availableTemplates}
-              selectedTemplate={selectedTemplate}
-              onTemplateSelect={onTemplateSelect}
-              hasTranscripts={transcripts.length > 0}
-              isModelConfigLoading={isModelConfigLoading}
-              isPreparingExternalAI={externalAI.isPreparingPrompt}
-              onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
-              onOpenPasteExternalAI={externalAI.openPasteDialog}
-              onOpenModelSettings={onOpenModelSettings}
-            />
+          <div className="shrink-0 px-3 pb-4 pt-6 sm:px-4 sm:pt-8">
+            <div className="hidden justify-center lg:flex">{renderGenerator(true, false)}</div>
+            <div className="flex items-center justify-between gap-2 lg:hidden">
+              {renderGenerator(false, false)}
+              {compactOverflow}
+            </div>
           </div>
           {/* Loading spinner */}
           <div className="flex items-center justify-center flex-1">
@@ -390,29 +406,14 @@ export function SummaryPanel({
           </div>
         </div>
       ) : !aiSummary ? (
-        <div className="flex flex-col h-full">
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {/* Centered Summary Generator Button Group when no summary */}
-          <div className="flex items-center justify-center gap-2 pt-8 pb-4">
-            <SummaryGeneratorButtonGroup
-              modelConfig={modelConfig}
-              setModelConfig={setModelConfig}
-              onSaveModelConfig={onSaveModelConfig}
-              onGenerateSummary={onGenerateSummary}
-              onStopGeneration={onStopGeneration}
-              customPrompt={customPrompt}
-              summaryStatus={summaryStatus}
-              availableTemplates={availableTemplates}
-              selectedTemplate={selectedTemplate}
-              onTemplateSelect={onTemplateSelect}
-              hasTranscripts={transcripts.length > 0}
-              hasSummary={false}
-              isModelConfigLoading={isModelConfigLoading}
-              isPreparingExternalAI={externalAI.isPreparingPrompt}
-              onPrepareExternalAI={externalAI.prepareExternalAIPrompt}
-              onOpenPasteExternalAI={externalAI.openPasteDialog}
-              onOpenModelSettings={onOpenModelSettings}
-              languageSlot={transcripts.length > 0 ? languageSlot : undefined}
-            />
+          <div className="shrink-0 px-3 pb-4 pt-6 sm:px-4 sm:pt-8">
+            <div className="hidden justify-center lg:flex">{renderGenerator(true)}</div>
+            <div className="flex items-center justify-between gap-2 lg:hidden">
+              {renderGenerator(false)}
+              {compactOverflow}
+            </div>
           </div>
           {/* Empty state message */}
           <EmptyStateSummary
@@ -422,53 +423,8 @@ export function SummaryPanel({
           />
         </div>
       ) : transcripts?.length > 0 && (
-        <div className="flex-1 overflow-y-auto min-h-0">
-          {summaryResponse && (
-            <div className="fixed bottom-0 left-0 right-0 bg-white shadow-lg p-4 max-h-1/3 overflow-y-auto">
-              <h3 className="text-lg font-semibold mb-2">Meeting Summary</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white p-4 rounded-lg shadow-sm">
-                  <h4 className="font-medium mb-1">Key Points</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.key_points.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Action Items</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.action_items.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Decisions</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.decisions.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="bg-white p-4 rounded-lg shadow-sm mt-4">
-                  <h4 className="font-medium mb-1">Main Topics</h4>
-                  <ul className="list-disc pl-4">
-                    {summaryResponse.summary.main_topics.blocks.map((block, i) => (
-                      <li key={i} className="text-sm">{block.content}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-              {summaryResponse.raw_summary ? (
-                <div className="mt-4">
-                  <h4 className="font-medium mb-1">Full Summary</h4>
-                  <p className="text-sm whitespace-pre-wrap">{summaryResponse.raw_summary}</p>
-                </div>
-              ) : null}
-            </div>
-          )}
-          <div className="p-6 w-full">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="w-full p-3 sm:p-6">
             <BlockNoteSummaryView
               ref={summaryRef}
               summaryData={aiSummary}
@@ -544,7 +500,7 @@ export function SummaryPanel({
           <Textarea
             readOnly
             value={selectedExternalPrompt?.text ?? ''}
-            className="min-h-[340px] resize-y font-mono text-xs"
+            className="min-h-[180px] resize-y font-mono text-xs sm:min-h-[340px]"
           />
 
           <DialogFooter>
@@ -588,7 +544,7 @@ export function SummaryPanel({
             value={externalAI.pasteValue}
             onChange={(event) => externalAI.setPasteValue(event.target.value)}
             placeholder="Paste the external AI Markdown result here..."
-            className="min-h-[320px] resize-y font-mono text-sm"
+            className="min-h-[180px] resize-y font-mono text-sm sm:min-h-[320px]"
           />
 
           {aiSummary && (

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DEFAULT_COMPACT_MEETING_PANE,
+  getAdjacentCompactPane,
   getCompactSummaryActions,
   type CompactMeetingPane,
 } from '@/lib/responsive-meeting-workspace';
@@ -26,5 +27,11 @@ describe('responsive meeting workspace', () => {
       'paste-ai-result',
       'ai-model',
     ]);
+  });
+
+  test('moves between compact panes with either arrow direction', () => {
+    expect(getAdjacentCompactPane('summary', 'ArrowLeft')).toBe('transcript');
+    expect(getAdjacentCompactPane('transcript', 'ArrowRight')).toBe('summary');
+    expect(getAdjacentCompactPane('summary', 'ArrowRight')).toBe('transcript');
   });
 });

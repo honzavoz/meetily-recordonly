@@ -43,6 +43,7 @@ interface SummaryGeneratorButtonGroupProps {
   onPrepareExternalAI?: () => void;
   onOpenPasteExternalAI?: () => void;
   onOpenModelSettings?: (openFn: () => void) => void;
+  showSecondaryActions?: boolean;
 }
 
 export function SummaryGeneratorButtonGroup({
@@ -63,7 +64,8 @@ export function SummaryGeneratorButtonGroup({
   onPrepareExternalAI,
   onOpenPasteExternalAI,
   onOpenModelSettings,
-  languageSlot
+  languageSlot,
+  showSecondaryActions = true,
 }: SummaryGeneratorButtonGroupProps) {
   const [isCheckingModels, setIsCheckingModels] = useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -263,7 +265,7 @@ export function SummaryGeneratorButtonGroup({
           title="Stop summary generation"
         >
           <Square className="xl:mr-2" size={18} fill="currentColor" />
-          <span className="hidden lg:inline xl:inline">Stop</span>
+          <span className="hidden sm:inline">Stop</span>
         </Button>
       ) : (
         <Button
@@ -291,7 +293,7 @@ export function SummaryGeneratorButtonGroup({
           ) : (
             <>
               <Sparkles className="xl:mr-2" size={18} />
-              <span className="hidden lg:inline xl:inline">{hasSummary ? 'Regenerate Summary' : 'Generate Summary'}</span>
+              <span className="hidden sm:inline">{hasSummary ? 'Regenerate' : 'Generate'}</span>
             </>
           )}
         </Button>
@@ -299,7 +301,7 @@ export function SummaryGeneratorButtonGroup({
 
       {languageSlot}
 
-      {!isGenerating && (
+      {!isGenerating && showSecondaryActions && (
         <>
           <Button
             variant="outline"
@@ -336,7 +338,7 @@ export function SummaryGeneratorButtonGroup({
 
       {/* Settings button */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
-        <DialogTrigger asChild>
+        {showSecondaryActions && <DialogTrigger asChild>
           <Button
             variant="outline"
             size="sm"
@@ -345,9 +347,10 @@ export function SummaryGeneratorButtonGroup({
             <Settings />
             <span className="hidden lg:inline">AI Model</span>
           </Button>
-        </DialogTrigger>
+        </DialogTrigger>}
         <DialogContent
           aria-describedby={undefined}
+          className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
         >
           <VisuallyHidden>
             <DialogTitle>Model Settings</DialogTitle>
@@ -366,7 +369,7 @@ export function SummaryGeneratorButtonGroup({
       </Dialog>
 
       {/* Template selector dropdown */}
-      {availableTemplates.length > 0 && (
+      {showSecondaryActions && availableTemplates.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
