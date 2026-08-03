@@ -36,6 +36,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ProjectChips } from '@/components/Projects/ProjectChips';
 import { ProjectPicker } from '@/components/Projects/ProjectPicker';
 import type { Project } from '@/types/projects';
+import { RESPONSIVE_MARKDOWN_SUMMARY_CLASSES } from '@/lib/responsive-markdown-summary';
 
 interface SummaryPanelProps {
   meeting: {
@@ -351,7 +352,7 @@ export function SummaryPanel({
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
       {/* Title area */}
-      <div className="shrink-0 border-b border-gray-200 p-3 sm:p-4">
+      <div className="min-w-0 shrink-0 border-b border-gray-200 p-3 sm:p-4">
         <div className="mb-3 flex flex-col gap-2">
           <EditableTitle
             title={meetingTitle}
@@ -425,8 +426,8 @@ export function SummaryPanel({
           />
         </div>
       ) : transcripts?.length > 0 && (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <div className="w-full p-3 sm:p-6">
+        <div className={RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.scrollArea}>
+          <div className="min-w-0 w-full max-w-full p-3 sm:p-6">
             <BlockNoteSummaryView
               ref={summaryRef}
               summaryData={aiSummary}
@@ -458,7 +459,7 @@ export function SummaryPanel({
       )}
 
       <Dialog open={externalAI.promptDialogOpen} onOpenChange={externalAI.setPromptDialogOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className={`max-w-3xl ${RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.dialog}`}>
           <DialogHeader>
             <DialogTitle>External AI Prompt</DialogTitle>
             <DialogDescription>
@@ -466,44 +467,46 @@ export function SummaryPanel({
             </DialogDescription>
           </DialogHeader>
 
-          {externalAI.promptPackage?.warning && (
-            <Alert>
-              <AlertTitle>Long transcript split into parts</AlertTitle>
-              <AlertDescription>
-                Copy each part into the external AI first, then copy the final merge prompt after you have the partial summaries.
-              </AlertDescription>
-            </Alert>
-          )}
+          <div className={`${RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.dialogBody} space-y-4 pr-1`}>
+            {externalAI.promptPackage?.warning && (
+              <Alert>
+                <AlertTitle>Long transcript split into parts</AlertTitle>
+                <AlertDescription>
+                  Copy each part into the external AI first, then copy the final merge prompt after you have the partial summaries.
+                </AlertDescription>
+              </Alert>
+            )}
 
-          {externalAI.promptPackage && externalAI.promptPackage.parts.length > 1 && (
-            <div className="flex flex-wrap gap-2">
-              {externalAI.promptPackage.parts.map((part, index) => (
+            {externalAI.promptPackage && externalAI.promptPackage.parts.length > 1 && (
+              <div className="flex flex-wrap gap-2">
+                {externalAI.promptPackage.parts.map((part, index) => (
+                  <Button
+                    key={part.title}
+                    type="button"
+                    variant={externalAI.selectedPromptIndex === index ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => externalAI.copyPromptPart(index)}
+                  >
+                    {part.title}
+                  </Button>
+                ))}
                 <Button
-                  key={part.title}
                   type="button"
-                  variant={externalAI.selectedPromptIndex === index ? 'default' : 'outline'}
+                  variant="outline"
                   size="sm"
-                  onClick={() => externalAI.copyPromptPart(index)}
+                  onClick={externalAI.copyMergePrompt}
                 >
-                  {part.title}
+                  Final merge prompt
                 </Button>
-              ))}
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={externalAI.copyMergePrompt}
-              >
-                Final merge prompt
-              </Button>
-            </div>
-          )}
+              </div>
+            )}
 
-          <Textarea
-            readOnly
-            value={selectedExternalPrompt?.text ?? ''}
-            className="min-h-[180px] resize-y font-mono text-xs sm:min-h-[340px]"
-          />
+            <Textarea
+              readOnly
+              value={selectedExternalPrompt?.text ?? ''}
+              className="min-h-[180px] max-w-full resize-y font-mono text-xs sm:min-h-[340px]"
+            />
+          </div>
 
           <DialogFooter>
             <Button
@@ -525,7 +528,7 @@ export function SummaryPanel({
       </Dialog>
 
       <Dialog open={externalAI.pasteDialogOpen} onOpenChange={externalAI.setPasteDialogOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className={`max-w-3xl ${RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.dialog}`}>
           <DialogHeader>
             <DialogTitle>Paste AI Result</DialogTitle>
             <DialogDescription>
@@ -533,33 +536,35 @@ export function SummaryPanel({
             </DialogDescription>
           </DialogHeader>
 
-          {aiSummary && (
-            <Alert>
-              <AlertTitle>Existing notes will be replaced</AlertTitle>
-              <AlertDescription>
-                This meeting already has notes. Confirm replacement before saving the pasted AI result.
-              </AlertDescription>
-            </Alert>
-          )}
+          <div className={`${RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.dialogBody} space-y-4 pr-1`}>
+            {aiSummary && (
+              <Alert>
+                <AlertTitle>Existing notes will be replaced</AlertTitle>
+                <AlertDescription>
+                  This meeting already has notes. Confirm replacement before saving the pasted AI result.
+                </AlertDescription>
+              </Alert>
+            )}
 
-          <Textarea
-            value={externalAI.pasteValue}
-            onChange={(event) => externalAI.setPasteValue(event.target.value)}
-            placeholder="Paste the external AI Markdown result here..."
-            className="min-h-[180px] resize-y font-mono text-sm sm:min-h-[320px]"
-          />
+            <Textarea
+              value={externalAI.pasteValue}
+              onChange={(event) => externalAI.setPasteValue(event.target.value)}
+              placeholder="Paste the external AI Markdown result here..."
+              className="min-h-[180px] max-w-full resize-y font-mono text-sm sm:min-h-[320px]"
+            />
 
-          {aiSummary && (
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={externalAI.overwriteConfirmed}
-                onChange={(event) => externalAI.setOverwriteConfirmed(event.target.checked)}
-                className="h-4 w-4 rounded border-gray-300"
-              />
-              Replace existing meeting notes
-            </label>
-          )}
+            {aiSummary && (
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={externalAI.overwriteConfirmed}
+                  onChange={(event) => externalAI.setOverwriteConfirmed(event.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                Replace existing meeting notes
+              </label>
+            )}
+          </div>
 
           <DialogFooter>
             <Button

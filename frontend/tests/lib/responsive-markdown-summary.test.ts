@@ -3,6 +3,14 @@ import { readFileSync } from 'node:fs';
 import { RESPONSIVE_MARKDOWN_SUMMARY_CLASSES } from '@/lib/responsive-markdown-summary';
 
 const globalStyles = readFileSync(new URL('../../src/app/globals.css', import.meta.url), 'utf8');
+const summaryPanelSource = readFileSync(
+  new URL('../../src/components/MeetingDetails/SummaryPanel.tsx', import.meta.url),
+  'utf8',
+);
+const updaterSource = readFileSync(
+  new URL('../../src/components/MeetingDetails/SummaryUpdaterButtonGroup.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('responsive markdown summary layout contract', () => {
   test('keeps the summary content as a bounded vertical scroll area', () => {
@@ -33,5 +41,21 @@ describe('responsive markdown summary layout contract', () => {
 
   test('does not force every BlockNote node to overflow its container', () => {
     expect(globalStyles).not.toMatch(/\[data-node-type\]\s*\{[^}]*overflow:\s*visible\s*!important/);
+  });
+
+  test('uses the bounded scroll contract for rendered summary content', () => {
+    expect(summaryPanelSource).toContain('RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.scrollArea');
+  });
+
+  test('keeps updater controls within the available toolbar width', () => {
+    expect(updaterSource).toContain('max-w-full');
+    expect(updaterSource).toContain('shrink-0');
+  });
+
+  test('gives both External AI dialogs their own scrolling body', () => {
+    expect(summaryPanelSource).toContain('RESPONSIVE_MARKDOWN_SUMMARY_CLASSES.dialog');
+    expect(
+      summaryPanelSource.match(/RESPONSIVE_MARKDOWN_SUMMARY_CLASSES\.dialogBody/g)?.length,
+    ).toBe(2);
   });
 });

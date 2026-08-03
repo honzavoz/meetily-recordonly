@@ -27,7 +27,7 @@ export function SummaryUpdaterButtonGroup({
   showCopy = true,
 }: SummaryUpdaterButtonGroupProps) {
   return (
-    <ButtonGroup>
+    <ButtonGroup className="max-w-full shrink-0">
       {/* Save button */}
       <Button
         variant="outline"
