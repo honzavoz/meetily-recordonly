@@ -51,6 +51,7 @@ import Logo from '../Logo';
 import Info from '../Info';
 import { ComplianceNotification } from '../ComplianceNotification';
 import { ProjectPicker } from '@/components/Projects/ProjectPicker';
+import { ProjectChips } from '@/components/Projects/ProjectChips';
 import { ProjectSidebarNavigation } from '@/components/Projects/ProjectSidebarNavigation';
 import type { Project } from '@/types/projects';
 
@@ -87,6 +88,7 @@ const Sidebar: React.FC = () => {
     projectsError,
     refetchProjects,
     assignProject,
+    removeProject,
     createAndAssignProject,
     renameProject,
     deleteProject,
@@ -789,7 +791,7 @@ const Sidebar: React.FC = () => {
             </>
           ) : (
             <div className="flex flex-col w-full">
-              <div className="flex items-center w-full">
+              <div className="flex items-start w-full">
                 {isMeetingItem ? (
                   <div className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full mr-2 bg-gray-100">
                     <File className="w-3.5 h-3.5 text-gray-600" />
@@ -806,10 +808,15 @@ const Sidebar: React.FC = () => {
                       {getSidebarMeetingSubtitle(item)}
                     </div>
                   )}
-                </div>
-                {isMeetingItem && (
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                    <div onClick={(event) => event.stopPropagation()}>
+                  {isMeetingItem && (
+                    <div
+                      className="mt-1.5 flex flex-wrap items-center gap-1"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <ProjectChips
+                        projects={item.projects ?? []}
+                        onRemove={(project) => removeProject(item.id, project.id)}
+                      />
                       <ProjectPicker
                         compact
                         label="Project"
@@ -818,29 +825,25 @@ const Sidebar: React.FC = () => {
                         onSelect={(project) => assignProject(item.id, project)}
                         onCreate={(name) => createAndAssignProject(item.id, name)}
                       />
-                    </div>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
+                      <button
+                        onClick={() => {
                         handleEditStart(item.id, item.title);
-                      }}
-                      className="hover:text-blue-600 p-1 rounded-md hover:bg-blue-50 flex-shrink-0"
-                      aria-label="Edit meeting title"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteModalState({ isOpen: true, itemId: item.id });
-                      }}
-                      className="hover:text-red-600 p-1 rounded-md hover:bg-red-50 flex-shrink-0"
-                      aria-label="Delete meeting"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
+                        }}
+                        className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-blue-50 hover:text-blue-600"
+                        aria-label="Edit meeting title"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteModalState({ isOpen: true, itemId: item.id })}
+                        className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-red-50 hover:text-red-600"
+                        aria-label="Delete meeting"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Show transcript match snippet if available */}
@@ -940,9 +943,25 @@ const Sidebar: React.FC = () => {
                     <div className="mt-0.5 truncate text-xs text-gray-500">
                       {getTranscribeLaterSubtitle(recording)}
                     </div>
-                    <div className="mt-1 flex items-center gap-1">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <ProjectChips
+                        projects={recording.projects ?? []}
+                        onRemove={(project) => transcribeLater.removeProject(recording, project.id)}
+                      />
+                      <ProjectPicker
+                        compact
+                        label="Project"
+                        projects={projects}
+                        assignedProjectIds={(recording.projects ?? []).map((project) => project.id)}
+                        onSelect={(project) => transcribeLater.assignProject(recording, project)}
+                        onCreate={async (name) => {
+                          const project = await transcribeLater.createAndAssignProject(recording, name);
+                          await refetchProjects();
+                          return project;
+                        }}
+                      />
                       <button
-                        className="rounded-md p-1 text-green-700 hover:bg-green-100"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-green-700 hover:bg-green-100"
                         onClick={() => transcribeLater.play(recording)}
                         title="Play"
                         aria-label="Play recording"
@@ -950,7 +969,7 @@ const Sidebar: React.FC = () => {
                         <Play className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        className="rounded-md p-1 text-amber-700 hover:bg-amber-100"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-amber-700 hover:bg-amber-100"
                         onClick={() => transcribeLater.transcribe(recording)}
                         title="Transcribe"
                         aria-label="Transcribe recording"
@@ -958,7 +977,7 @@ const Sidebar: React.FC = () => {
                         <Upload className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100"
                         onClick={() => handleTranscribeRenameStart(recording)}
                         disabled={renamingTranscribeRecordingId === recording.id}
                         title="Rename"
@@ -967,7 +986,7 @@ const Sidebar: React.FC = () => {
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        className="rounded-md p-1 text-gray-600 hover:bg-gray-100"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100"
                         onClick={() => transcribeLater.openFolder(recording)}
                         title="Open Folder"
                         aria-label="Open recording folder"
@@ -975,7 +994,7 @@ const Sidebar: React.FC = () => {
                         <FolderOpen className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        className="rounded-md p-1 text-red-600 hover:bg-red-50"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-red-600 hover:bg-red-50"
                         onClick={() => setTranscribeDeleteModalState({ isOpen: true, recording })}
                         title="Delete"
                         aria-label="Delete recording"
