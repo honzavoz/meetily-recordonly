@@ -385,6 +385,22 @@ pub fn clean_llm_markdown_output(markdown: &str) -> String {
     trimmed.to_string()
 }
 
+fn clean_markdown_transform_output(source_markdown: &str, raw_output: &str) -> String {
+    let source = source_markdown.trim();
+    let source_owns_outer_fence = (source.starts_with("```markdown\n")
+        || source.starts_with("```\n"))
+        && source.ends_with("```");
+
+    if source_owns_outer_fence {
+        THINKING_TAG_REGEX
+            .replace_all(raw_output, "")
+            .trim()
+            .to_string()
+    } else {
+        clean_llm_markdown_output(raw_output)
+    }
+}
+
 /// Extracts meeting name from the first heading in markdown
 ///
 /// # Arguments
@@ -706,6 +722,7 @@ async fn run_markdown_transform(
     api_key: &str,
     system_prompt: &str,
     user_prompt: &str,
+    source_markdown: &str,
     failure_label: &str,
     ollama_endpoint: Option<&str>,
     custom_openai_endpoint: Option<&str>,
@@ -739,7 +756,7 @@ async fn run_markdown_transform(
     .await
     .map_err(|e| format!("{failure_label} failed: {e}"))?;
 
-    Ok(clean_llm_markdown_output(&raw))
+    Ok(clean_markdown_transform_output(source_markdown, &raw))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -782,6 +799,7 @@ async fn translate_markdown(
             api_key,
             &system_prompt,
             &user_prompt,
+            chunk,
             &failure_label,
             ollama_endpoint,
             custom_openai_endpoint,
@@ -826,6 +844,7 @@ async fn normalize_markdown_to_english(
         api_key,
         english_normalization_system_prompt(),
         &user_prompt,
+        markdown,
         "English normalization pass",
         ollama_endpoint,
         custom_openai_endpoint,
@@ -920,6 +939,31 @@ mod tests {
         assert_eq!(
             restore_boundary_whitespace("    nested list item\n", " \nvnořená položka\n "),
             "    vnořená položka\n"
+        );
+    }
+
+    #[test]
+    fn transform_cleanup_preserves_source_owned_unlabelled_fence() {
+        let source = "```\nconst answer = 42;\n```";
+
+        assert_eq!(clean_markdown_transform_output(source, source), source);
+    }
+
+    #[test]
+    fn transform_cleanup_preserves_source_owned_markdown_labelled_fence() {
+        let source = "```markdown\n# Example\n```";
+
+        assert_eq!(clean_markdown_transform_output(source, source), source);
+    }
+
+    #[test]
+    fn transform_cleanup_still_removes_distinguishable_model_wrapper() {
+        let source = "# Heading\n\nParagraph.";
+        let raw = "```markdown\n# Nadpis\n\nOdstavec.\n```";
+
+        assert_eq!(
+            clean_markdown_transform_output(source, raw),
+            "# Nadpis\n\nOdstavec."
         );
     }
 
