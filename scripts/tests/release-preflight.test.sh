@@ -236,9 +236,11 @@ grep -Fq 'deployment-environment:' "$build_workflow" || fail "reusable build lac
 grep -A5 'deployment-environment:' "$build_workflow" | grep -Fq 'default: "ci"' || fail "normal reusable builds must default to the ci environment"
 grep -Fq 'environment: ${{ inputs.deployment-environment }}' "$build_workflow" || fail "reusable build job does not use its selected environment"
 grep -Fq 'deployment-environment: "release"' "$release_workflow" || fail "release build does not select the protected release environment"
-if grep -A8 '^    secrets:' "$release_workflow" | grep -q 'TAURI_SIGNING_PRIVATE_KEY'; then
-  fail "release caller must not pass repository updater secrets"
-fi
+release_build_block="$(sed -n '/^  build-macos-apple-silicon:/,/^  verify-and-publish:/p' "$release_workflow")"
+[[ "$release_build_block" == *'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'* ]] \
+  || fail "release caller must pass the encrypted updater private key"
+[[ "$release_build_block" == *'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}'* ]] \
+  || fail "release caller must pass the encrypted updater password"
 workflow_call_block="$(sed -n '/^  workflow_call:/,/^jobs:/p' "$build_workflow")"
 [[ "$workflow_call_block" == *'TAURI_SIGNING_PRIVATE_KEY:'* ]] || fail "reusable workflow_call must declare the updater private key"
 [[ "$workflow_call_block" == *'TAURI_SIGNING_PRIVATE_KEY_PASSWORD:'* ]] || fail "reusable workflow_call must declare the updater password"

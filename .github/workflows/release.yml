@@ -124,6 +124,9 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/build.yml
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     with:
       platform: "macos-14"
       target: "aarch64-apple-darwin"
