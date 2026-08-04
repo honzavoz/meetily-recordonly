@@ -1,4 +1,4 @@
-use crate::summary::llm_client::{generate_summary, LLMProvider};
+use crate::summary::llm_client::{generate_summary, is_request_timeout_error, LLMProvider};
 use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
 use regex::Regex;
@@ -766,7 +766,10 @@ fn is_translation_timeout_error(error: &str) -> bool {
         return false;
     }
 
-    normalized.contains("timed out") || normalized.contains("timeout")
+    let request_error = error
+        .strip_prefix("Translation pass failed: ")
+        .unwrap_or(error);
+    is_request_timeout_error(request_error)
 }
 
 async fn retry_translation_timeout_once<T, F, Fut>(mut operation: F) -> Result<T, String>
@@ -895,10 +898,16 @@ mod tests {
             "LLM request timed out after 300 seconds"
         ));
         assert!(is_translation_timeout_error(
+            "Translation pass failed: LLM request timed out after 300 seconds"
+        ));
+        assert!(!is_translation_timeout_error(
             "provider request failed: operation timeout"
         ));
         assert!(!is_translation_timeout_error(
             "Summary generation was cancelled after a timeout"
+        ));
+        assert!(!is_translation_timeout_error(
+            "LLM API request failed: upstream timeout"
         ));
         assert!(!is_translation_timeout_error("LLM API request failed: 429"));
     }

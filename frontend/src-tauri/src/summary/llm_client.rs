@@ -14,6 +14,10 @@ fn request_timeout_error() -> String {
     )
 }
 
+pub(crate) fn is_request_timeout_error(error: &str) -> bool {
+    error == request_timeout_error()
+}
+
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
 pub struct ChatMessage {
@@ -373,5 +377,15 @@ mod tests {
             request_timeout_error(),
             "LLM request timed out after 300 seconds"
         );
+    }
+
+    #[test]
+    fn request_timeout_error_classifier_rejects_provider_message() {
+        assert!(is_request_timeout_error(
+            "LLM request timed out after 300 seconds"
+        ));
+        assert!(!is_request_timeout_error(
+            "LLM API request failed: upstream timeout"
+        ));
     }
 }
