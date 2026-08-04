@@ -334,13 +334,26 @@ fn chunk_markdown_for_translation(markdown: &str, max_chars: usize) -> Vec<&str>
     chunks
 }
 
-fn restore_trailing_whitespace(original_chunk: &str, translated_chunk: &str) -> String {
+fn restore_boundary_whitespace(original_chunk: &str, translated_chunk: &str) -> String {
+    if original_chunk.chars().all(char::is_whitespace) {
+        return original_chunk.to_string();
+    }
+
+    let prefix_end = original_chunk
+        .char_indices()
+        .find(|(_, character)| !character.is_whitespace())
+        .map_or(original_chunk.len(), |(offset, _)| offset);
     let suffix_start = original_chunk
         .char_indices()
         .rev()
         .find(|(_, character)| !character.is_whitespace())
         .map_or(0, |(offset, character)| offset + character.len_utf8());
-    format!("{translated_chunk}{}", &original_chunk[suffix_start..])
+    format!(
+        "{}{}{}",
+        &original_chunk[..prefix_end],
+        translated_chunk.trim(),
+        &original_chunk[suffix_start..]
+    )
 }
 
 /// Cleans markdown output from LLM by removing thinking tags and code fences
@@ -779,7 +792,7 @@ async fn translate_markdown(
             cancellation_token,
         )
         .await?;
-        translated_markdown.push_str(&restore_trailing_whitespace(chunk, &translated_chunk));
+        translated_markdown.push_str(&restore_boundary_whitespace(chunk, &translated_chunk));
     }
 
     Ok(translated_markdown)
@@ -888,10 +901,26 @@ mod tests {
         let reassembled = originals
             .iter()
             .zip(translated)
-            .map(|(original, translated)| restore_trailing_whitespace(original, translated))
+            .map(|(original, translated)| restore_boundary_whitespace(original, translated))
             .collect::<String>();
 
         assert_eq!(reassembled, "# Nadpis\n\nOdstavec.\n");
+    }
+
+    #[test]
+    fn translated_hard_split_chunk_restores_leading_space() {
+        assert_eq!(
+            restore_boundary_whitespace(" continuation", "pokračování"),
+            " pokračování"
+        );
+    }
+
+    #[test]
+    fn translated_indented_markdown_chunk_restores_significant_indentation() {
+        assert_eq!(
+            restore_boundary_whitespace("    nested list item\n", " \nvnořená položka\n "),
+            "    vnořená položka\n"
+        );
     }
 
     #[test]
