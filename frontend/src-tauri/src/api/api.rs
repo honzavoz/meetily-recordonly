@@ -20,6 +20,21 @@ use crate::{
 
 // Hardcoded server URL
 const APP_SERVER_URL: &str = "http://localhost:5167";
+const CUSTOM_OPENAI_CONNECTION_TEST_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(90);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_openai_connection_test_allows_a_cold_local_model_start() {
+        assert_eq!(
+            CUSTOM_OPENAI_CONNECTION_TEST_TIMEOUT,
+            std::time::Duration::from_secs(90)
+        );
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiResponse<T> {
@@ -1459,7 +1474,7 @@ pub async fn api_test_custom_openai_connection<R: Runtime>(
     });
 
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
+        .timeout(CUSTOM_OPENAI_CONNECTION_TEST_TIMEOUT)
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
