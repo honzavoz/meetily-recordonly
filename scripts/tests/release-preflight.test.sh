@@ -239,9 +239,9 @@ grep -Fq 'deployment-environment: "release"' "$release_workflow" || fail "releas
 if grep -A8 '^    secrets:' "$release_workflow" | grep -q 'TAURI_SIGNING_PRIVATE_KEY'; then
   fail "release caller must not pass repository updater secrets"
 fi
-if sed -n '/^    secrets:/,/^jobs:/p' "$build_workflow" | grep -q 'TAURI_SIGNING_PRIVATE_KEY'; then
-  fail "reusable workflow_call must not declare caller-provided updater secrets"
-fi
+workflow_call_block="$(sed -n '/^  workflow_call:/,/^jobs:/p' "$build_workflow")"
+[[ "$workflow_call_block" == *'TAURI_SIGNING_PRIVATE_KEY:'* ]] || fail "reusable workflow_call must declare the updater private key"
+[[ "$workflow_call_block" == *'TAURI_SIGNING_PRIVATE_KEY_PASSWORD:'* ]] || fail "reusable workflow_call must declare the updater password"
 if grep -Eq 'deployment-environment:.*release' "$build_test_workflow"; then
   fail "normal build-test must not gain access to the release environment"
 fi
