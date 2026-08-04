@@ -6,6 +6,7 @@ use crate::summary::language_detection::detect_summary_language;
 use crate::summary::metadata::read_detected_summary_language_from_metadata;
 use crate::summary::processor::{
     extract_meeting_name_from_markdown, generate_meeting_summary, language_name_from_code,
+    SummaryGenerationFailure,
 };
 use crate::summary::templates::{self, Template};
 use crate::ollama::metadata::ModelMetadataCache;
@@ -148,6 +149,22 @@ fn build_summary_result_json(
             output_language: normalise_summary_language_for_cache(output_language),
         },
     })
+}
+
+fn build_failed_summary_cache_result(
+    failure: &SummaryGenerationFailure,
+    source: SummaryCacheSource,
+) -> Option<serde_json::Value> {
+    if failure.is_cancelled() {
+        return None;
+    }
+    let english_markdown = failure.english_markdown.as_deref()?;
+    Some(build_summary_result_json(
+        english_markdown,
+        english_markdown,
+        source,
+        None,
+    ))
 }
 
 /// Parses a `summary_processes.result` JSON blob and extracts a cached English
@@ -582,15 +599,35 @@ impl SummaryService {
                     );
                 }
             }
-            Err(e) => {
+            Err(failure) => {
                 // Check if error is due to cancellation
-                if e.contains("cancelled") {
+                if failure.is_cancelled() {
                     info!("Summary generation was cancelled for meeting_id: {}", meeting_id);
                     if let Err(db_err) = SummaryProcessesRepository::update_process_cancelled(&pool, &meeting_id).await {
                         error!("Failed to update DB status to cancelled for {}: {}", meeting_id, db_err);
                     }
                 } else {
-                    Self::update_process_failed(&pool, &meeting_id, &e).await;
+                    let failed_result =
+                        build_failed_summary_cache_result(&failure, cache_source);
+                    error!(
+                        "Processing failed for meeting_id {}: {}",
+                        meeting_id, failure
+                    );
+                    if let Err(db_err) = SummaryProcessesRepository::update_process_failed_with_result(
+                        &pool,
+                        &meeting_id,
+                        &failure.message,
+                        failed_result,
+                        failure.chunk_count,
+                        duration,
+                    )
+                    .await
+                    {
+                        error!(
+                            "Failed to update DB status to failed for {}: {}",
+                            meeting_id, db_err
+                        );
+                    }
                 }
             }
         }
@@ -621,6 +658,36 @@ impl SummaryService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_failure_builds_failed_cache_result_reusable_for_czech_retry() {
+        let source = sample_cache_source();
+        let failure = SummaryGenerationFailure {
+            message: "Translation to Czech failed: timed out".to_string(),
+            english_markdown: Some("# Meeting\n## Decisions\nShip it".to_string()),
+            chunk_count: 2,
+        };
+
+        let result = build_failed_summary_cache_result(&failure, source.clone())
+            .expect("translation failure should retain canonical English");
+
+        assert_eq!(result["markdown"], "## Decisions\nShip it");
+        assert_eq!(
+            extract_cached_english_markdown(&result.to_string(), &source, Some("cs")).unwrap(),
+            Some("# Meeting\n## Decisions\nShip it".to_string())
+        );
+    }
+
+    #[test]
+    fn cancellation_never_builds_a_failed_cache_result() {
+        let failure = SummaryGenerationFailure {
+            message: "Summary generation was cancelled".to_string(),
+            english_markdown: Some("# English already generated".to_string()),
+            chunk_count: 1,
+        };
+
+        assert!(build_failed_summary_cache_result(&failure, sample_cache_source()).is_none());
+    }
 
     #[test]
     fn test_strip_leading_title_with_body() {

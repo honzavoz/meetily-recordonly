@@ -186,6 +186,55 @@ impl SummaryProcessesRepository {
         Ok(())
     }
 
+    pub async fn update_process_failed_with_result(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        error: &str,
+        result: Option<Value>,
+        chunk_count: i64,
+        processing_time: f64,
+    ) -> Result<(), sqlx::Error> {
+        let now = Utc::now();
+        let result = result
+            .map(|value| {
+                serde_json::to_string(&value).map_err(|e| {
+                    sqlx::Error::Protocol(format!("Failed to serialize failed result: {}", e))
+                })
+            })
+            .transpose()?;
+
+        sqlx::query(
+            r#"
+            UPDATE summary_processes
+            SET
+                status = 'failed',
+                error = ?,
+                updated_at = ?,
+                end_time = ?,
+                result = COALESCE(?, result_backup, result),
+                chunk_count = ?,
+                processing_time = ?,
+                result_backup = NULL,
+                result_backup_timestamp = NULL
+            WHERE meeting_id = ?
+            "#,
+        )
+        .bind(error)
+        .bind(now)
+        .bind(now)
+        .bind(result)
+        .bind(chunk_count)
+        .bind(processing_time)
+        .bind(meeting_id)
+        .execute(pool)
+        .await?;
+        log_info!(
+            "Summary generation failed with result metadata for meeting_id: {}",
+            meeting_id
+        );
+        Ok(())
+    }
+
     pub async fn update_process_cancelled(
         pool: &SqlitePool,
         meeting_id: &str,
@@ -217,5 +266,122 @@ impl SummaryProcessesRepository {
             meeting_id
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE summary_processes (
+                meeting_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error TEXT,
+                result TEXT,
+                start_time TEXT,
+                end_time TEXT,
+                chunk_count INTEGER DEFAULT 0,
+                processing_time REAL DEFAULT 0.0,
+                metadata TEXT,
+                result_backup TEXT,
+                result_backup_timestamp TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn failed_with_result_persists_cache_metadata_and_keeps_failed_status() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result_backup) VALUES (?, 'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+        )
+        .bind("meeting-1")
+        .bind(r#"{"markdown":"old successful result"}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let cached =
+            serde_json::json!({"markdown":"English", "english_cache":{"markdown":"English"}});
+        SummaryProcessesRepository::update_process_failed_with_result(
+            &pool,
+            "meeting-1",
+            "translation failed",
+            Some(cached.clone()),
+            4,
+            1.25,
+        )
+        .await
+        .unwrap();
+
+        let row = sqlx::query_as::<_, (String, String, Option<String>, i64, f64, Option<String>, Option<String>, Option<String>)>(
+            "SELECT status, error, result, chunk_count, processing_time, end_time, result_backup, result_backup_timestamp FROM summary_processes WHERE meeting_id = ?",
+        )
+        .bind("meeting-1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "failed");
+        assert_eq!(row.1, "translation failed");
+        let cached_json = cached.to_string();
+        assert_eq!(row.2.as_deref(), Some(cached_json.as_str()));
+        assert_eq!(row.3, 4);
+        assert_eq!(row.4, 1.25);
+        assert!(row.5.is_some());
+        assert!(row.6.is_none());
+        assert!(row.7.is_none());
+    }
+
+    #[tokio::test]
+    async fn failed_without_new_result_restores_existing_backup() {
+        let pool = test_pool().await;
+        let backup = r#"{"markdown":"last successful result"}"#;
+        sqlx::query(
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result, result_backup) VALUES (?, 'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?)",
+        )
+        .bind("meeting-2")
+        .bind(r#"{"markdown":"in-progress value"}"#)
+        .bind(backup)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        SummaryProcessesRepository::update_process_failed_with_result(
+            &pool,
+            "meeting-2",
+            "generation failed",
+            None,
+            0,
+            0.5,
+        )
+        .await
+        .unwrap();
+
+        let row = sqlx::query_as::<_, (String, Option<String>, Option<String>)>(
+            "SELECT status, result, result_backup FROM summary_processes WHERE meeting_id = ?",
+        )
+        .bind("meeting-2")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "failed");
+        assert_eq!(row.1.as_deref(), Some(backup));
+        assert!(row.2.is_none());
     }
 }

@@ -8,6 +8,44 @@ use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryGenerationFailure {
+    pub message: String,
+    pub english_markdown: Option<String>,
+    pub chunk_count: i64,
+}
+
+impl SummaryGenerationFailure {
+    fn before_english(message: String, chunk_count: i64) -> Self {
+        Self {
+            message,
+            english_markdown: None,
+            chunk_count,
+        }
+    }
+
+    fn after_english(message: String, english_markdown: &str, chunk_count: i64) -> Self {
+        Self {
+            message,
+            english_markdown: Some(english_markdown.to_string()),
+            chunk_count,
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        let message = self.message.to_ascii_lowercase();
+        message.contains("cancelled") || message.contains("canceled")
+    }
+}
+
+impl std::fmt::Display for SummaryGenerationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SummaryGenerationFailure {}
+
 // Compile regex once and reuse (significant performance improvement for repeated calls)
 static THINKING_TAG_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap());
@@ -462,10 +500,13 @@ pub async fn generate_meeting_summary(
     summary_language: Option<&str>,
     detected_transcript_language: Option<&str>,
     cached_english: Option<&str>,
-) -> Result<(String, String, i64), String> {
+) -> Result<(String, String, i64), SummaryGenerationFailure> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
-            return Err("Summary generation was cancelled".to_string());
+            return Err(SummaryGenerationFailure::before_english(
+                "Summary generation was cancelled".to_string(),
+                0,
+            ));
         }
     }
     info!(
@@ -523,7 +564,10 @@ pub async fn generate_meeting_summary(
                             i + 1,
                             num_chunks
                         );
-                        return Err("Summary generation was cancelled".to_string());
+                        return Err(SummaryGenerationFailure::before_english(
+                            "Summary generation was cancelled".to_string(),
+                            chunk_summaries.len() as i64,
+                        ));
                     }
                 }
 
@@ -554,7 +598,10 @@ pub async fn generate_meeting_summary(
                     Err(e) => {
                         // Check if error is due to cancellation
                         if e.contains("cancelled") {
-                            return Err(e);
+                            return Err(SummaryGenerationFailure::before_english(
+                                e,
+                                chunk_summaries.len() as i64,
+                            ));
                         }
                         error!("Failed processing chunk {}/{}: {}", i + 1, num_chunks, e);
                     }
@@ -562,10 +609,11 @@ pub async fn generate_meeting_summary(
             }
 
             if chunk_summaries.is_empty() {
-                return Err(
+                return Err(SummaryGenerationFailure::before_english(
                     "Multi-level summarization failed: No chunks were processed successfully."
                         .to_string(),
-                );
+                    0,
+                ));
             }
 
             successful_chunk_count = chunk_summaries.len() as i64;
@@ -598,7 +646,10 @@ pub async fn generate_meeting_summary(
                     app_data_dir,
                     cancellation_token,
                 )
-                .await?
+                .await
+                .map_err(|message| {
+                    SummaryGenerationFailure::before_english(message, successful_chunk_count)
+                })?
             } else {
                 chunk_summaries.remove(0)
             };
@@ -629,7 +680,10 @@ pub async fn generate_meeting_summary(
         if let Some(token) = cancellation_token {
             if token.is_cancelled() {
                 info!("Summary generation cancelled before final summary");
-                return Err("Summary generation was cancelled".to_string());
+                return Err(SummaryGenerationFailure::before_english(
+                    "Summary generation was cancelled".to_string(),
+                    successful_chunk_count,
+                ));
             }
         }
 
@@ -648,7 +702,10 @@ pub async fn generate_meeting_summary(
             app_data_dir,
             cancellation_token,
         )
-        .await?;
+        .await
+        .map_err(|message| {
+            SummaryGenerationFailure::before_english(message, successful_chunk_count)
+        })?;
 
         let english_markdown = clean_llm_markdown_output(&raw_markdown);
         info!("Summary pass completed ({} chars)", english_markdown.len());
@@ -679,7 +736,13 @@ pub async fn generate_meeting_summary(
             .await
             {
                 Ok(translated) => translated,
-                Err(e) => return Err(format!("Translation to {} failed: {}", name, e)),
+                Err(e) => {
+                    return Err(SummaryGenerationFailure::after_english(
+                        format!("Translation to {} failed: {}", name, e),
+                        &english_markdown,
+                        successful_chunk_count,
+                    ))
+                }
             }
         }
         FinalLanguageAction::NormalizeEnglish => {
@@ -704,7 +767,14 @@ pub async fn generate_meeting_summary(
                     cancellation_token,
                 )
                 .await,
-            )?;
+            )
+            .map_err(|message| {
+                SummaryGenerationFailure::after_english(
+                    message,
+                    &english_markdown,
+                    successful_chunk_count,
+                )
+            })?;
             english_markdown = normalized.clone();
             normalized
         }
@@ -891,6 +961,37 @@ async fn normalize_markdown_to_english(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summary_generation_failure_preserves_payload_and_display_message() {
+        let failure = SummaryGenerationFailure {
+            message: "Translation to Czech failed: timed out".to_string(),
+            english_markdown: Some("# Meeting\n\nEnglish body".to_string()),
+            chunk_count: 3,
+        };
+
+        assert_eq!(
+            failure.to_string(),
+            "Translation to Czech failed: timed out"
+        );
+        assert_eq!(
+            failure.english_markdown.as_deref(),
+            Some("# Meeting\n\nEnglish body")
+        );
+        assert_eq!(failure.chunk_count, 3);
+        assert!(!failure.is_cancelled());
+    }
+
+    #[test]
+    fn summary_generation_failure_keeps_cancellation_distinguishable() {
+        let failure = SummaryGenerationFailure::before_english(
+            "Summary generation was cancelled".to_string(),
+            0,
+        );
+
+        assert!(failure.is_cancelled());
+        assert_eq!(failure.english_markdown, None);
+    }
 
     #[test]
     fn translation_retry_classifies_timeout_but_never_cancellation() {
