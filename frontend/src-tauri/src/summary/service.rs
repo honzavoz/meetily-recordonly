@@ -663,6 +663,7 @@ mod tests {
     fn translation_failure_builds_failed_cache_result_reusable_for_czech_retry() {
         let source = sample_cache_source();
         let failure = SummaryGenerationFailure {
+            kind: crate::summary::processor::SummaryGenerationFailureKind::Failed,
             message: "Translation to Czech failed: timed out".to_string(),
             english_markdown: Some("# Meeting\n## Decisions\nShip it".to_string()),
             chunk_count: 2,
@@ -681,12 +682,108 @@ mod tests {
     #[test]
     fn cancellation_never_builds_a_failed_cache_result() {
         let failure = SummaryGenerationFailure {
+            kind: crate::summary::processor::SummaryGenerationFailureKind::Cancelled,
             message: "Summary generation was cancelled".to_string(),
             english_markdown: Some("# English already generated".to_string()),
             chunk_count: 1,
         };
 
         assert!(build_failed_summary_cache_result(&failure, sample_cache_source()).is_none());
+    }
+
+    #[test]
+    fn provider_cancelled_text_still_builds_reusable_failed_cache() {
+        let source = sample_cache_source();
+        let failure = SummaryGenerationFailure {
+            kind: crate::summary::processor::SummaryGenerationFailureKind::Failed,
+            message: "Provider says request was cancelled".to_string(),
+            english_markdown: Some("# Meeting\n## Summary\nEnglish".to_string()),
+            chunk_count: 1,
+        };
+
+        let result = build_failed_summary_cache_result(&failure, source.clone()).unwrap();
+        assert_eq!(
+            extract_cached_english_markdown(&result.to_string(), &source, Some("cs")).unwrap(),
+            failure.english_markdown
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_translation_keeps_localized_display_and_reuses_new_english_cache() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE summary_processes (
+                meeting_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error TEXT,
+                result TEXT,
+                start_time TEXT,
+                end_time TEXT,
+                chunk_count INTEGER DEFAULT 0,
+                processing_time REAL DEFAULT 0.0,
+                metadata TEXT,
+                result_backup TEXT,
+                result_backup_timestamp TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let localized = serde_json::json!({"markdown": "Původní české shrnutí"});
+        sqlx::query(
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result_backup) VALUES (?, 'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+        )
+        .bind("meeting-localized")
+        .bind(localized.to_string())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let source = sample_cache_source();
+        let failure = SummaryGenerationFailure {
+            kind: crate::summary::processor::SummaryGenerationFailureKind::Failed,
+            message: "Translation to Czech failed: timed out".to_string(),
+            english_markdown: Some("# Meeting\n## Summary\nEnglish".to_string()),
+            chunk_count: 2,
+        };
+        let failed_result = build_failed_summary_cache_result(&failure, source.clone()).unwrap();
+        SummaryProcessesRepository::update_process_failed_with_result(
+            &pool,
+            "meeting-localized",
+            &failure.message,
+            Some(failed_result),
+            failure.chunk_count,
+            1.0,
+        )
+        .await
+        .unwrap();
+
+        let row = sqlx::query_as::<_, (String, String, Option<String>)>(
+            "SELECT status, result, result_backup FROM summary_processes WHERE meeting_id = ?",
+        )
+        .bind("meeting-localized")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "failed");
+        assert!(row.2.is_none());
+        let merged = row.1;
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&merged).unwrap()["markdown"],
+            localized["markdown"]
+        );
+        assert_eq!(
+            extract_cached_english_markdown(&merged, &source, Some("cs")).unwrap(),
+            failure.english_markdown
+        );
     }
 
     #[test]

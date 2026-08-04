@@ -211,7 +211,15 @@ impl SummaryProcessesRepository {
                 error = ?,
                 updated_at = ?,
                 end_time = ?,
-                result = COALESCE(?, result_backup, result),
+                result = CASE
+                    WHEN ? IS NULL THEN COALESCE(result_backup, result)
+                    WHEN COALESCE(result_backup, result) IS NULL THEN ?
+                    ELSE json_set(
+                        COALESCE(result_backup, result),
+                        '$.english_cache',
+                        json_extract(?, '$.english_cache')
+                    )
+                END,
                 chunk_count = ?,
                 processing_time = ?,
                 result_backup = NULL,
@@ -222,7 +230,9 @@ impl SummaryProcessesRepository {
         .bind(error)
         .bind(now)
         .bind(now)
-        .bind(result)
+        .bind(result.as_deref())
+        .bind(result.as_deref())
+        .bind(result.as_deref())
         .bind(chunk_count)
         .bind(processing_time)
         .bind(meeting_id)
@@ -308,11 +318,15 @@ mod tests {
     #[tokio::test]
     async fn failed_with_result_persists_cache_metadata_and_keeps_failed_status() {
         let pool = test_pool().await;
+        let localized = serde_json::json!({
+            "markdown": "Předchozí české shrnutí",
+            "other_display_metadata": "keep me"
+        });
         sqlx::query(
             "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result_backup) VALUES (?, 'PENDING', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
         )
         .bind("meeting-1")
-        .bind(r#"{"markdown":"old successful result"}"#)
+        .bind(localized.to_string())
         .execute(&pool)
         .await
         .unwrap();
@@ -339,8 +353,10 @@ mod tests {
         .unwrap();
         assert_eq!(row.0, "failed");
         assert_eq!(row.1, "translation failed");
-        let cached_json = cached.to_string();
-        assert_eq!(row.2.as_deref(), Some(cached_json.as_str()));
+        let merged: Value = serde_json::from_str(row.2.as_deref().unwrap()).unwrap();
+        assert_eq!(merged["markdown"], localized["markdown"]);
+        assert_eq!(merged["other_display_metadata"], "keep me");
+        assert_eq!(merged["english_cache"], cached["english_cache"]);
         assert_eq!(row.3, 4);
         assert_eq!(row.4, 1.25);
         assert!(row.5.is_some());

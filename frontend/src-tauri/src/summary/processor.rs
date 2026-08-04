@@ -9,7 +9,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SummaryGenerationFailureKind {
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SummaryGenerationFailure {
+    pub kind: SummaryGenerationFailureKind,
     pub message: String,
     pub english_markdown: Option<String>,
     pub chunk_count: i64,
@@ -18,6 +25,7 @@ pub struct SummaryGenerationFailure {
 impl SummaryGenerationFailure {
     fn before_english(message: String, chunk_count: i64) -> Self {
         Self {
+            kind: SummaryGenerationFailureKind::Failed,
             message,
             english_markdown: None,
             chunk_count,
@@ -26,15 +34,54 @@ impl SummaryGenerationFailure {
 
     fn after_english(message: String, english_markdown: &str, chunk_count: i64) -> Self {
         Self {
+            kind: SummaryGenerationFailureKind::Failed,
             message,
             english_markdown: Some(english_markdown.to_string()),
             chunk_count,
         }
     }
 
+    fn cancelled(message: String, chunk_count: i64) -> Self {
+        Self {
+            kind: SummaryGenerationFailureKind::Cancelled,
+            message,
+            english_markdown: None,
+            chunk_count,
+        }
+    }
+
+    fn before_english_from_error(
+        message: String,
+        chunk_count: i64,
+        cancellation_token: Option<&CancellationToken>,
+    ) -> Self {
+        if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+            Self::cancelled(message, chunk_count)
+        } else {
+            Self::before_english(message, chunk_count)
+        }
+    }
+
+    fn after_english_from_error(
+        message: String,
+        english_markdown: &str,
+        chunk_count: i64,
+        cancellation_token: Option<&CancellationToken>,
+    ) -> Self {
+        if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+            Self {
+                kind: SummaryGenerationFailureKind::Cancelled,
+                message,
+                english_markdown: Some(english_markdown.to_string()),
+                chunk_count,
+            }
+        } else {
+            Self::after_english(message, english_markdown, chunk_count)
+        }
+    }
+
     pub fn is_cancelled(&self) -> bool {
-        let message = self.message.to_ascii_lowercase();
-        message.contains("cancelled") || message.contains("canceled")
+        self.kind == SummaryGenerationFailureKind::Cancelled
     }
 }
 
@@ -503,7 +550,7 @@ pub async fn generate_meeting_summary(
 ) -> Result<(String, String, i64), SummaryGenerationFailure> {
     if let Some(token) = cancellation_token {
         if token.is_cancelled() {
-            return Err(SummaryGenerationFailure::before_english(
+            return Err(SummaryGenerationFailure::cancelled(
                 "Summary generation was cancelled".to_string(),
                 0,
             ));
@@ -564,7 +611,7 @@ pub async fn generate_meeting_summary(
                             i + 1,
                             num_chunks
                         );
-                        return Err(SummaryGenerationFailure::before_english(
+                        return Err(SummaryGenerationFailure::cancelled(
                             "Summary generation was cancelled".to_string(),
                             chunk_summaries.len() as i64,
                         ));
@@ -597,8 +644,8 @@ pub async fn generate_meeting_summary(
                     }
                     Err(e) => {
                         // Check if error is due to cancellation
-                        if e.contains("cancelled") {
-                            return Err(SummaryGenerationFailure::before_english(
+                        if cancellation_token.is_some_and(CancellationToken::is_cancelled) {
+                            return Err(SummaryGenerationFailure::cancelled(
                                 e,
                                 chunk_summaries.len() as i64,
                             ));
@@ -648,7 +695,11 @@ pub async fn generate_meeting_summary(
                 )
                 .await
                 .map_err(|message| {
-                    SummaryGenerationFailure::before_english(message, successful_chunk_count)
+                    SummaryGenerationFailure::before_english_from_error(
+                        message,
+                        successful_chunk_count,
+                        cancellation_token,
+                    )
                 })?
             } else {
                 chunk_summaries.remove(0)
@@ -680,7 +731,7 @@ pub async fn generate_meeting_summary(
         if let Some(token) = cancellation_token {
             if token.is_cancelled() {
                 info!("Summary generation cancelled before final summary");
-                return Err(SummaryGenerationFailure::before_english(
+                return Err(SummaryGenerationFailure::cancelled(
                     "Summary generation was cancelled".to_string(),
                     successful_chunk_count,
                 ));
@@ -704,7 +755,11 @@ pub async fn generate_meeting_summary(
         )
         .await
         .map_err(|message| {
-            SummaryGenerationFailure::before_english(message, successful_chunk_count)
+            SummaryGenerationFailure::before_english_from_error(
+                message,
+                successful_chunk_count,
+                cancellation_token,
+            )
         })?;
 
         let english_markdown = clean_llm_markdown_output(&raw_markdown);
@@ -737,10 +792,11 @@ pub async fn generate_meeting_summary(
             {
                 Ok(translated) => translated,
                 Err(e) => {
-                    return Err(SummaryGenerationFailure::after_english(
+                    return Err(SummaryGenerationFailure::after_english_from_error(
                         format!("Translation to {} failed: {}", name, e),
                         &english_markdown,
                         successful_chunk_count,
+                        cancellation_token,
                     ))
                 }
             }
@@ -769,10 +825,11 @@ pub async fn generate_meeting_summary(
                 .await,
             )
             .map_err(|message| {
-                SummaryGenerationFailure::after_english(
+                SummaryGenerationFailure::after_english_from_error(
                     message,
                     &english_markdown,
                     successful_chunk_count,
+                    cancellation_token,
                 )
             })?;
             english_markdown = normalized.clone();
@@ -965,6 +1022,7 @@ mod tests {
     #[test]
     fn summary_generation_failure_preserves_payload_and_display_message() {
         let failure = SummaryGenerationFailure {
+            kind: SummaryGenerationFailureKind::Failed,
             message: "Translation to Czech failed: timed out".to_string(),
             english_markdown: Some("# Meeting\n\nEnglish body".to_string()),
             chunk_count: 3,
@@ -984,13 +1042,26 @@ mod tests {
 
     #[test]
     fn summary_generation_failure_keeps_cancellation_distinguishable() {
-        let failure = SummaryGenerationFailure::before_english(
-            "Summary generation was cancelled".to_string(),
-            0,
-        );
+        let failure =
+            SummaryGenerationFailure::cancelled("Summary generation was cancelled".to_string(), 0);
 
         assert!(failure.is_cancelled());
         assert_eq!(failure.english_markdown, None);
+    }
+
+    #[test]
+    fn provider_error_text_cannot_impersonate_cancellation() {
+        let failure = SummaryGenerationFailure::after_english(
+            "Provider rejected request: operation cancelled upstream".to_string(),
+            "# Canonical English",
+            1,
+        );
+
+        assert!(!failure.is_cancelled());
+        assert_eq!(
+            failure.english_markdown.as_deref(),
+            Some("# Canonical English")
+        );
     }
 
     #[test]
