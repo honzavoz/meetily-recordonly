@@ -42,6 +42,18 @@ function expectFailure(label, mutate, pattern) {
 const verified = verifyUpdaterReleaseAssets(fixture())
 assert.equal(verified.archive.name, archiveName)
 
+const aliasFixture = fixture()
+const aliasManifest = JSON.parse(aliasFixture.manifestText)
+aliasManifest.platforms['darwin-aarch64-app'] = { url: archiveUrl, signature }
+aliasFixture.manifestText = JSON.stringify(aliasManifest)
+assert.equal(verifyUpdaterReleaseAssets(aliasFixture).archive.name, archiveName)
+
+expectFailure('mismatched darwin app alias', input => {
+  const manifest = JSON.parse(input.manifestText)
+  manifest.platforms['darwin-aarch64-app'] = { url: `${archiveUrl}.wrong`, signature }
+  input.manifestText = JSON.stringify(manifest)
+}, /darwin-aarch64-app.*exactly match/i)
+
 expectFailure('wrong repository URL', input => {
   const archive = input.assets.find(asset => asset.name === archiveName)
   archive.browser_download_url = archive.browser_download_url.replace('honzavoz/', 'attacker/')
@@ -68,7 +80,13 @@ expectFailure('wrong architecture', input => {
   const manifest = JSON.parse(input.manifestText)
   manifest.platforms = { 'darwin-x86_64': manifest.platforms['darwin-aarch64'] }
   input.manifestText = JSON.stringify(manifest)
-}, /darwin\/aarch64/i)
+}, /canonical darwin-aarch64/i)
+
+expectFailure('substring is not canonical platform', input => {
+  const manifest = JSON.parse(input.manifestText)
+  manifest.platforms = { 'prefix-darwin-aarch64-suffix': manifest.platforms['darwin-aarch64'] }
+  input.manifestText = JSON.stringify(manifest)
+}, /canonical darwin-aarch64/i)
 
 expectFailure('signature mismatch', input => {
   input.signatureText = 'different-signature'

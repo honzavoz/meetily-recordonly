@@ -13,6 +13,7 @@ jobs:
   create-release:
     permissions:
       contents: write
+    environment: release
     runs-on: ubuntu-latest
     outputs:
       release-id: ${{ steps.create-release.outputs.result }}
@@ -132,15 +133,14 @@ jobs:
       upload-artifacts: false
       release-id: ${{ needs.create-release.outputs.release-id }}
       source-ref: ${{ github.sha }}
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      deployment-environment: "release"
 
   verify-and-publish:
     needs: [create-release, build-macos-apple-silicon]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    environment: release
     steps:
       - name: Checkout verified source
         uses: actions/checkout@v7

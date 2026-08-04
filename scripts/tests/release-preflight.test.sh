@@ -156,6 +156,7 @@ fi
 pass_count=$((pass_count + 1))
 
 build_workflow="$repo_root/.github/workflows/build.yml"
+build_test_workflow="$repo_root/.github/workflows/build-test.yml"
 asset_verifier="$repo_root/scripts/verify-updater-release-assets.js"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$build_workflow" || fail "build does not pass updater private key to Tauri"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$build_workflow" || fail "build does not pass updater private key password to Tauri"
@@ -188,9 +189,9 @@ grep -Fq 'latest.json' "$asset_verifier" || fail "release does not require updat
 grep -Fq '.dmg' "$asset_verifier" || fail "release does not require DMG asset"
 grep -Fq '.app.tar.gz' "$asset_verifier" || fail "release does not require updater archive"
 grep -Fq "manifest.version !== expectedVersion" "$asset_verifier" || fail "latest.json version is not validated"
-grep -Fq "normalized.includes('darwin')" "$asset_verifier" || fail "latest.json Darwin platform is not validated"
-grep -Fq "normalized.includes('aarch64')" "$asset_verifier" || fail "latest.json aarch64 platform is not validated"
-grep -Fq 'platform.url !== archive.browser_download_url' "$asset_verifier" || fail "latest.json updater URL is not validated exactly"
+grep -Fq "platforms['darwin-aarch64']" "$asset_verifier" || fail "latest.json canonical darwin-aarch64 platform is not validated"
+grep -Fq "platforms['darwin-aarch64-app']" "$asset_verifier" || fail "latest.json darwin-aarch64-app alias is not validated when present"
+grep -Fq 'entry.url !== archive.browser_download_url' "$asset_verifier" || fail "latest.json updater URL is not validated exactly"
 grep -Fq 'github.rest.repos.updateRelease' "$release_workflow" || fail "verified draft is not published"
 grep -Fq 'draft: false' "$release_workflow" || fail "release publish does not clear draft flag"
 grep -Fq 'github.ref_name' "$release_workflow" || fail "release does not gate execution to the default branch"
@@ -210,6 +211,21 @@ grep -Fq 'if (!matchingRelease.draft)' "$release_workflow" || fail "release may 
 grep -Fq 'target_commitish: context.sha' "$release_workflow" || fail "reused draft is not pinned to the dispatched SHA"
 grep -Fq "require('./scripts/verify-updater-release-assets.js')" "$release_workflow" || fail "workflow does not run the executable asset verifier"
 grep -Fq 'release.tag_name !== expectedTag' "$release_workflow" || fail "draft release tag is not verified before publish"
+grep -A8 '^  create-release:' "$release_workflow" | grep -Fq 'environment: release' || fail "release creation is not protected by the release environment"
+grep -Fq 'deployment-environment:' "$build_workflow" || fail "reusable build lacks deployment-environment input"
+grep -A5 'deployment-environment:' "$build_workflow" | grep -Fq 'default: "ci"' || fail "normal reusable builds must default to the ci environment"
+grep -Fq 'environment: ${{ inputs.deployment-environment }}' "$build_workflow" || fail "reusable build job does not use its selected environment"
+grep -Fq 'deployment-environment: "release"' "$release_workflow" || fail "release build does not select the protected release environment"
+if grep -A8 '^    secrets:' "$release_workflow" | grep -q 'TAURI_SIGNING_PRIVATE_KEY'; then
+  fail "release caller must not pass repository updater secrets"
+fi
+if sed -n '/^    secrets:/,/^jobs:/p' "$build_workflow" | grep -q 'TAURI_SIGNING_PRIVATE_KEY'; then
+  fail "reusable workflow_call must not declare caller-provided updater secrets"
+fi
+if grep -Eq 'deployment-environment:.*release' "$build_test_workflow"; then
+  fail "normal build-test must not gain access to the release environment"
+fi
+grep -Fq 'uses: ./.github/workflows/build.yml' "$build_test_workflow" || fail "normal build-test no longer exercises reusable build defaults"
 pass_count=$((pass_count + 1))
 
 if command -v ruby >/dev/null 2>&1; then

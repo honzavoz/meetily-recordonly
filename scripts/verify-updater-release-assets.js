@@ -53,22 +53,30 @@ function verifyUpdaterReleaseAssets(input) {
     throw new Error(`latest.json version ${manifest.version} does not match ${expectedVersion}`)
   }
 
-  const platformEntries = Object.entries(manifest.platforms || {}).filter(([platformKey]) => {
-    const normalized = platformKey.toLowerCase()
-    return normalized.includes('darwin') && normalized.includes('aarch64')
-  })
-  if (platformEntries.length !== 1) {
-    throw new Error(`Expected exactly one darwin/aarch64 platform entry; found ${platformEntries.length}`)
+  const platforms = manifest.platforms || {}
+  const platform = platforms['darwin-aarch64']
+  if (!platform || typeof platform !== 'object') {
+    throw new Error('latest.json must contain the canonical darwin-aarch64 platform entry')
   }
-  const [, platform] = platformEntries[0]
-  if (platform.url !== archive.browser_download_url) {
-    throw new Error('latest.json URL must exactly match the aarch64 updater release asset URL')
+
+  const verifyPlatform = (platformName, entry) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error(`latest.json ${platformName} entry is invalid`)
+    }
+    if (entry.url !== archive.browser_download_url) {
+      throw new Error(`latest.json ${platformName} URL must exactly match the aarch64 updater release asset URL`)
+    }
+    if (typeof entry.signature !== 'string' || !entry.signature) {
+      throw new Error(`latest.json ${platformName} signature is empty`)
+    }
+    if (entry.signature !== signatureText) {
+      throw new Error(`latest.json ${platformName} signature must match the downloaded signature asset`)
+    }
   }
-  if (typeof platform.signature !== 'string' || !platform.signature.trim()) {
-    throw new Error('latest.json darwin/aarch64 signature is empty')
-  }
-  if (platform.signature !== signatureText) {
-    throw new Error('latest.json signature must match the downloaded signature asset')
+
+  verifyPlatform('darwin-aarch64', platform)
+  if (Object.hasOwn(platforms, 'darwin-aarch64-app')) {
+    verifyPlatform('darwin-aarch64-app', platforms['darwin-aarch64-app'])
   }
 
   return { archive, signature, dmg, manifestAsset }

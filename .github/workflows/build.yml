@@ -39,20 +39,20 @@ on:
         required: false
         type: string
         default: ${{ github.sha }}
+      deployment-environment:
+        required: false
+        type: string
+        default: "ci"
       is-debug-build:
         required: false
         type: boolean
         default: false
-    secrets:
-      TAURI_SIGNING_PRIVATE_KEY:
-        required: false
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
-        required: false
 
 jobs:
   build:
     permissions:
       contents: write
+    environment: ${{ inputs.deployment-environment }}
     runs-on: ${{ inputs.platform }}
     steps:
       - name: Checkout repository
