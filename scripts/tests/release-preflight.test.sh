@@ -156,6 +156,7 @@ fi
 pass_count=$((pass_count + 1))
 
 build_workflow="$repo_root/.github/workflows/build.yml"
+asset_verifier="$repo_root/scripts/verify-updater-release-assets.js"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$build_workflow" || fail "build does not pass updater private key to Tauri"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$build_workflow" || fail "build does not pass updater private key password to Tauri"
 grep -Fq "if: contains(inputs.platform, 'macos') && inputs.sign-binaries" "$build_workflow" || fail "Apple signing is not conditional on sign-binaries"
@@ -172,24 +173,48 @@ if grep -q 'check-apple-signing-secrets.sh' "$release_workflow"; then
 fi
 
 updater_check_line="$(grep -n 'check-updater-signing-secrets.sh' "$release_workflow" | head -1 | cut -d: -f1)"
+branch_gate_line="$(grep -n 'Require default branch release' "$release_workflow" | head -1 | cut -d: -f1)"
 draft_line="$(grep -n 'Create Draft Release' "$release_workflow" | head -1 | cut -d: -f1)"
 verify_line="$(grep -n 'Verify draft release assets' "$release_workflow" | head -1 | cut -d: -f1)"
 publish_line="$(grep -n 'Publish verified release' "$release_workflow" | head -1 | cut -d: -f1)"
 [[ -n "$updater_check_line" && -n "$draft_line" && "$updater_check_line" -lt "$draft_line" ]] || fail "updater secret preflight must run before draft creation"
+[[ -n "$branch_gate_line" && -n "$updater_check_line" && "$branch_gate_line" -lt "$updater_check_line" ]] || fail "default branch gate must run before updater secrets are accessed"
 [[ -n "$verify_line" && -n "$publish_line" && "$verify_line" -lt "$publish_line" ]] || fail "publishing must happen after asset verification"
 
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$release_workflow" || fail "release does not reference updater private key secret"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$release_workflow" || fail "release does not reference updater password secret"
-grep -Fq '.app.tar.gz.sig' "$release_workflow" || fail "release does not require updater signature asset"
-grep -Fq 'latest.json' "$release_workflow" || fail "release does not require updater manifest"
-grep -Fq '.dmg' "$release_workflow" || fail "release does not require DMG asset"
-grep -Fq '.app.tar.gz' "$release_workflow" || fail "release does not require updater archive"
-grep -Fq "manifest.version !== expectedVersion" "$release_workflow" || fail "latest.json version is not validated"
-grep -Fq "platformKey.includes('darwin')" "$release_workflow" || fail "latest.json Darwin platform is not validated"
-grep -Fq "platformKey.includes('aarch64')" "$release_workflow" || fail "latest.json aarch64 platform is not validated"
-grep -Fq "platform.url.endsWith('.app.tar.gz')" "$release_workflow" || fail "latest.json updater URL is not validated"
+grep -Fq '.app.tar.gz.sig' "$asset_verifier" || fail "release does not require updater signature asset"
+grep -Fq 'latest.json' "$asset_verifier" || fail "release does not require updater manifest"
+grep -Fq '.dmg' "$asset_verifier" || fail "release does not require DMG asset"
+grep -Fq '.app.tar.gz' "$asset_verifier" || fail "release does not require updater archive"
+grep -Fq "manifest.version !== expectedVersion" "$asset_verifier" || fail "latest.json version is not validated"
+grep -Fq "normalized.includes('darwin')" "$asset_verifier" || fail "latest.json Darwin platform is not validated"
+grep -Fq "normalized.includes('aarch64')" "$asset_verifier" || fail "latest.json aarch64 platform is not validated"
+grep -Fq 'platform.url !== archive.browser_download_url' "$asset_verifier" || fail "latest.json updater URL is not validated exactly"
 grep -Fq 'github.rest.repos.updateRelease' "$release_workflow" || fail "verified draft is not published"
 grep -Fq 'draft: false' "$release_workflow" || fail "release publish does not clear draft flag"
+grep -Fq 'github.ref_name' "$release_workflow" || fail "release does not gate execution to the default branch"
+grep -Fq 'github.event.repository.default_branch' "$release_workflow" || fail "release does not use the repository default branch"
+grep -Fq 'target_commitish: context.sha' "$release_workflow" || fail "release tag is not pinned to the dispatched SHA"
+grep -Fq 'source-ref: ${{ github.sha }}' "$release_workflow" || fail "release build checkout is not pinned to the dispatched SHA"
+grep -Fq 'source-ref:' "$build_workflow" || fail "reusable build has no source-ref input"
+grep -Fq 'ref: ${{ inputs.source-ref }}' "$build_workflow" || fail "reusable build does not checkout source-ref"
+if grep -q 'secrets: inherit' "$release_workflow"; then
+  fail "release passes more secrets than required to reusable build"
+fi
+grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$release_workflow" || fail "release does not explicitly map updater private key"
+grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$release_workflow" || fail "release does not explicitly map updater password"
+grep -Fq 'github.rest.repos.listReleases' "$release_workflow" || fail "release does not look up an existing draft"
+grep -Fq 'github.rest.repos.deleteReleaseAsset' "$release_workflow" || fail "release retry does not clear stale draft assets"
+grep -Fq 'if (!matchingRelease.draft)' "$release_workflow" || fail "release may reuse a non-draft release"
+grep -Fq 'target_commitish: context.sha' "$release_workflow" || fail "reused draft is not pinned to the dispatched SHA"
+grep -Fq "require('./scripts/verify-updater-release-assets.js')" "$release_workflow" || fail "workflow does not run the executable asset verifier"
+grep -Fq 'release.tag_name !== expectedTag' "$release_workflow" || fail "draft release tag is not verified before publish"
 pass_count=$((pass_count + 1))
+
+if command -v ruby >/dev/null 2>&1; then
+  ruby -e 'require "yaml"; ARGV.each { |path| YAML.parse_file(path) }' "$release_workflow" "$build_workflow" || fail "workflow YAML parsing failed"
+  pass_count=$((pass_count + 1))
+fi
 
 echo "PASS: $pass_count release preflight scenarios"

@@ -3,6 +3,8 @@ name: "Release"
 on:
   workflow_dispatch:
 
+permissions: {}
+
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -16,6 +18,17 @@ jobs:
       release-id: ${{ steps.create-release.outputs.result }}
       version: ${{ steps.get-version.outputs.version }}
     steps:
+      - name: Require default branch release
+        shell: bash
+        env:
+          CURRENT_BRANCH: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ "$CURRENT_BRANCH" != "$DEFAULT_BRANCH" || "$DEFAULT_BRANCH" != "main" ]]; then
+            echo "Releases are allowed only from the default main branch" >&2
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
@@ -49,22 +62,61 @@ jobs:
           echo "Release version: $VERSION"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Create Draft Release
+      - name: Find or Create Draft Release
         id: create-release
         uses: actions/github-script@v7
         with:
           script: |
-            const { data } = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: `v${{ steps.get-version.outputs.version }}`,
-              name: `Meetily v${{ steps.get-version.outputs.version }}`,
-              draft: true,
-              prerelease: false,
-              generate_release_notes: true
+            const owner = context.repo.owner
+            const repo = context.repo.repo
+            const tag = `v${{ steps.get-version.outputs.version }}`
+            const releases = await github.paginate(github.rest.repos.listReleases, {
+              owner,
+              repo,
+              per_page: 100
             })
-            console.log(`Created draft release with ID: ${data.id}`)
-            return data.id
+            const matching = releases.filter(release => release.tag_name === tag)
+            if (matching.length > 1) {
+              throw new Error(`Multiple releases exist for ${tag}; refusing ambiguous retry`)
+            }
+
+            let matchingRelease = matching[0]
+            if (matchingRelease) {
+              if (!matchingRelease.draft) {
+                throw new Error(`Release ${tag} already exists and is not a draft`)
+              }
+              const { data: updatedDraft } = await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: matchingRelease.id,
+                target_commitish: context.sha
+              })
+              matchingRelease = updatedDraft
+              const staleAssets = await github.paginate(github.rest.repos.listReleaseAssets, {
+                owner,
+                repo,
+                release_id: matchingRelease.id,
+                per_page: 100
+              })
+              for (const asset of staleAssets) {
+                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: asset.id })
+              }
+              core.info(`Reusing draft ${matchingRelease.id}; cleared ${staleAssets.length} stale assets`)
+            } else {
+              const { data } = await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: `Meetily v${{ steps.get-version.outputs.version }}`,
+                draft: true,
+                prerelease: false,
+                generate_release_notes: true
+              })
+              matchingRelease = data
+              core.info(`Created draft release with ID: ${data.id}`)
+            }
+            return matchingRelease.id
 
   build-macos-apple-silicon:
     needs: create-release
@@ -79,7 +131,10 @@ jobs:
       asset-prefix: "meetily"
       upload-artifacts: false
       release-id: ${{ needs.create-release.outputs.release-id }}
-    secrets: inherit
+      source-ref: ${{ github.sha }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
   verify-and-publish:
     needs: [create-release, build-macos-apple-silicon]
@@ -87,6 +142,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout verified source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+
       - name: Verify draft release assets
         uses: actions/github-script@v7
         env:
@@ -98,6 +158,8 @@ jobs:
             const expectedVersion = process.env.EXPECTED_VERSION
             const owner = context.repo.owner
             const repo = context.repo.repo
+            const expectedTag = `v${expectedVersion}`
+            const { verifyUpdaterReleaseAssets } = require('./scripts/verify-updater-release-assets.js')
 
             const { data: release } = await github.rest.repos.getRelease({
               owner,
@@ -107,6 +169,9 @@ jobs:
             if (!release.draft) {
               throw new Error('Release must remain a draft until verification succeeds')
             }
+            if (release.tag_name !== expectedTag) {
+              throw new Error(`Draft release tag ${release.tag_name} does not match ${expectedTag}`)
+            }
 
             const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
               owner,
@@ -114,50 +179,31 @@ jobs:
               release_id: releaseId,
               per_page: 100
             })
-            const requiredAssets = [
-              { label: 'DMG', matches: name => name.endsWith('.dmg') },
-              { label: 'updater archive', matches: name => name.endsWith('.app.tar.gz') },
-              { label: 'updater signature', matches: name => name.endsWith('.app.tar.gz.sig') },
-              { label: 'updater manifest', matches: name => name === 'latest.json' }
-            ]
-            const missingAssets = requiredAssets
-              .filter(required => !assets.some(asset => required.matches(asset.name)))
-              .map(required => required.label)
-            if (missingAssets.length > 0) {
-              throw new Error(`Draft release is missing required assets: ${missingAssets.join(', ')}`)
-            }
-
             const manifestAsset = assets.find(asset => asset.name === 'latest.json')
-            const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
-              owner,
-              repo,
-              asset_id: manifestAsset.id,
-              headers: { accept: 'application/octet-stream' }
+            const signatureAsset = assets.find(asset => asset.name.endsWith('.app.tar.gz.sig'))
+            const downloadText = async asset => {
+              if (!asset) return ''
+              const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
+                owner,
+                repo,
+                asset_id: asset.id,
+                headers: { accept: 'application/octet-stream' }
+              })
+              return Buffer.from(response.data).toString('utf8')
+            }
+            const [manifestText, signatureText] = await Promise.all([
+              downloadText(manifestAsset),
+              downloadText(signatureAsset)
+            ])
+            verifyUpdaterReleaseAssets({
+              assets,
+              manifestText,
+              signatureText,
+              expectedVersion,
+              expectedOwner: owner,
+              expectedRepo: repo,
+              expectedTag
             })
-            const manifestText = Buffer.from(response.data).toString('utf8')
-            let manifest
-            try {
-              manifest = JSON.parse(manifestText)
-            } catch (error) {
-              throw new Error(`latest.json is not valid JSON: ${error.message}`)
-            }
-
-            if (manifest.version !== expectedVersion) {
-              throw new Error(`latest.json version ${manifest.version} does not match ${expectedVersion}`)
-            }
-            const platformEntry = Object.entries(manifest.platforms || {}).find(([platformKey]) =>
-              platformKey.includes('darwin') && platformKey.includes('aarch64')
-            )
-            if (!platformEntry) {
-              throw new Error('latest.json has no darwin/aarch64 platform entry')
-            }
-            const [, platform] = platformEntry
-            if (typeof platform.url !== 'string' || !platform.url || !platform.url.endsWith('.app.tar.gz')) {
-              throw new Error('latest.json darwin/aarch64 URL must end with .app.tar.gz')
-            }
-            if (typeof platform.signature !== 'string' || !platform.signature.trim()) {
-              throw new Error('latest.json darwin/aarch64 signature is empty')
-            }
 
             core.info(`Verified ${assets.length} draft assets and latest.json for ${expectedVersion}`)
 
