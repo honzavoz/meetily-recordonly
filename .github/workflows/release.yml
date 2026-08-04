@@ -3,13 +3,11 @@ name: "Release"
 on:
   workflow_dispatch:
 
-# Prevent duplicate releases
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false  # Don't cancel releases, fail instead
+  cancel-in-progress: false
 
 jobs:
-  # STEP 1: Create draft release first
   create-release:
     permissions:
       contents: write
@@ -21,20 +19,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # Fetch all tags
+          fetch-depth: 0
 
       - name: Validate version consistency
         run: ./scripts/check-version-consistency.sh
 
-      - name: Validate Apple signing credentials
+      - name: Validate updater signing secrets
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-        run: ./scripts/check-apple-signing-secrets.sh
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: ./scripts/check-updater-signing-secrets.sh
 
       - name: Validate release version and tag
         id: get-version
@@ -72,115 +66,111 @@ jobs:
             console.log(`Created draft release with ID: ${data.id}`)
             return data.id
 
-  # STEP 2: Build all platforms and upload directly to release
-  # Note: Linux builds are excluded from release (only macOS and Windows)
-  build-all-platforms:
+  build-macos-apple-silicon:
     needs: create-release
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: "macos-latest" # for Apple Silicon only (M1 and above)
-            args: "--target aarch64-apple-darwin"
-            target: "aarch64-apple-darwin"
-          - platform: "windows-latest"
-            args: ""
-            target: "x86_64-pc-windows-msvc"
-
     uses: ./.github/workflows/build.yml
     with:
-      platform: ${{ matrix.platform }}
-      target: ${{ matrix.target }}
-      build-args: ${{ matrix.args }}
-      sign-binaries: true
+      platform: "macos-14"
+      target: "aarch64-apple-darwin"
+      build-args: "--target aarch64-apple-darwin"
+      sign-binaries: false
       asset-prefix: "meetily"
-      upload-artifacts: false  # tauri-action uploads directly to release
+      upload-artifacts: false
       release-id: ${{ needs.create-release.outputs.release-id }}
     secrets: inherit
 
-  # STEP 3: Show release summary
-  release-summary:
-    needs: [create-release, build-all-platforms]
+  verify-and-publish:
+    needs: [create-release, build-macos-apple-silicon]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Get release assets and latest.json
-        id: release-info
-        run: |
-          VERSION="${{ needs.create-release.outputs.version }}"
-          RELEASE_ID="${{ needs.create-release.outputs.release-id }}"
-
-          echo "## Release Assets" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # List all release assets
-          echo "### Files in Release" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          gh api repos/${{ github.repository }}/releases/${RELEASE_ID}/assets --jq '.[] | "\(.name) (\(.size / 1048576 | floor)MB)"' >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Download and show latest.json
-          echo "### latest.json content" >> $GITHUB_STEP_SUMMARY
-          gh release download "v${VERSION}" --pattern "latest.json" --dir . 2>/dev/null || echo "latest.json not yet available"
-          if [ -f latest.json ]; then
-            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
-            cat latest.json >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          # Download links
-          echo "### Download Links" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release page:** https://github.com/${{ github.repository }}/releases/tag/v${VERSION}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Download all as ZIP:** https://github.com/${{ github.repository }}/archive/refs/tags/v${VERSION}.zip" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Manual S3 upload:** Download latest.json from release and upload to \`s3://meetily-updates/latest.json\`" >> $GITHUB_STEP_SUMMARY
+      - name: Verify draft release assets
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+          EXPECTED_VERSION: ${{ needs.create-release.outputs.version }}
+        with:
+          script: |
+            const releaseId = Number(process.env.RELEASE_ID)
+            const expectedVersion = process.env.EXPECTED_VERSION
+            const owner = context.repo.owner
+            const repo = context.repo.repo
 
-      - name: Release Summary
-        run: |
-          echo "============================================"
-          echo "=== Release Created Successfully ==="
-          echo "============================================"
-          echo "Version: v${{ needs.create-release.outputs.version }}"
-          echo "Release URL: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.version }}"
-          echo ""
-          echo "Uploaded assets (via tauri-action):"
-          echo "  - macOS: DMG installer + app.tar.gz (for updater) + .sig"
-          echo "  - Windows: MSI + NSIS installers (SIGNED via signCommand) + .sig files"
-          echo "  - Updater manifest: latest.json (auto-generated by tauri-action)"
-          echo ""
-          echo "Next steps:"
-          echo "  1. Review the draft release"
-          echo "  2. Edit release notes if needed"
-          echo "  3. Publish the release when ready"
-          echo "============================================"
+            const { data: release } = await github.rest.repos.getRelease({
+              owner,
+              repo,
+              release_id: releaseId
+            })
+            if (!release.draft) {
+              throw new Error('Release must remain a draft until verification succeeds')
+            }
 
-          # Add to GitHub Step Summary
-          echo "## Release Created Successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** v${{ needs.create-release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release URL:** [View Release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.version }})" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Uploaded Assets" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Platform | Assets |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **macOS** | DMG installer, app.tar.gz (updater), .sig |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Windows** | MSI installer (SIGNED), NSIS installer (SIGNED), .sig files |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Updater** | latest.json manifest (auto-generated by tauri-action) |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "1. [Review the draft release](https://github.com/${{ github.repository }}/releases/tag/v${{ needs.create-release.outputs.version }})" >> $GITHUB_STEP_SUMMARY
-          echo "2. Edit release notes if needed" >> $GITHUB_STEP_SUMMARY
-          echo "3. Publish the release when ready" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner,
+              repo,
+              release_id: releaseId,
+              per_page: 100
+            })
+            const requiredAssets = [
+              { label: 'DMG', matches: name => name.endsWith('.dmg') },
+              { label: 'updater archive', matches: name => name.endsWith('.app.tar.gz') },
+              { label: 'updater signature', matches: name => name.endsWith('.app.tar.gz.sig') },
+              { label: 'updater manifest', matches: name => name === 'latest.json' }
+            ]
+            const missingAssets = requiredAssets
+              .filter(required => !assets.some(asset => required.matches(asset.name)))
+              .map(required => required.label)
+            if (missingAssets.length > 0) {
+              throw new Error(`Draft release is missing required assets: ${missingAssets.join(', ')}`)
+            }
+
+            const manifestAsset = assets.find(asset => asset.name === 'latest.json')
+            const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
+              owner,
+              repo,
+              asset_id: manifestAsset.id,
+              headers: { accept: 'application/octet-stream' }
+            })
+            const manifestText = Buffer.from(response.data).toString('utf8')
+            let manifest
+            try {
+              manifest = JSON.parse(manifestText)
+            } catch (error) {
+              throw new Error(`latest.json is not valid JSON: ${error.message}`)
+            }
+
+            if (manifest.version !== expectedVersion) {
+              throw new Error(`latest.json version ${manifest.version} does not match ${expectedVersion}`)
+            }
+            const platformEntry = Object.entries(manifest.platforms || {}).find(([platformKey]) =>
+              platformKey.includes('darwin') && platformKey.includes('aarch64')
+            )
+            if (!platformEntry) {
+              throw new Error('latest.json has no darwin/aarch64 platform entry')
+            }
+            const [, platform] = platformEntry
+            if (typeof platform.url !== 'string' || !platform.url || !platform.url.endsWith('.app.tar.gz')) {
+              throw new Error('latest.json darwin/aarch64 URL must end with .app.tar.gz')
+            }
+            if (typeof platform.signature !== 'string' || !platform.signature.trim()) {
+              throw new Error('latest.json darwin/aarch64 signature is empty')
+            }
+
+            core.info(`Verified ${assets.length} draft assets and latest.json for ${expectedVersion}`)
+
+      - name: Publish verified release
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.release-id }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false
+            })
+            core.info(`Published release: ${data.html_url}`)

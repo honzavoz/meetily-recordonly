@@ -4,6 +4,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 version_script="$repo_root/scripts/check-version-consistency.sh"
 signing_script="$repo_root/scripts/check-apple-signing-secrets.sh"
+updater_signing_script="$repo_root/scripts/check-updater-signing-secrets.sh"
 fixture_root="$(mktemp -d)"
 trap 'rm -rf "$fixture_root"' EXIT
 
@@ -34,6 +35,43 @@ make_version_fixture() {
 make_version_fixture "0.4.1" "0.4.1" "0.4.1"
 matching_output="$(MEETILY_REPO_ROOT="$fixture_root" "$version_script")"
 assert_contains "$matching_output" "Version consistency check passed: 0.4.1"
+pass_count=$((pass_count + 1))
+
+updater_complete_output="$(
+  TAURI_SIGNING_PRIVATE_KEY='private-key-secret-value' \
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD='private-key-password-secret-value' \
+  "$updater_signing_script"
+)"
+assert_contains "$updater_complete_output" "Updater signing preflight passed"
+[[ "$updater_complete_output" != *"private-key-secret-value"* ]] || fail "updater private key leaked into output"
+[[ "$updater_complete_output" != *"private-key-password-secret-value"* ]] || fail "updater private key password leaked into output"
+pass_count=$((pass_count + 1))
+
+set +e
+missing_updater_key_output="$(
+  TAURI_SIGNING_PRIVATE_KEY='' \
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD='private-key-password-secret-value' \
+  "$updater_signing_script" 2>&1
+)"
+missing_updater_key_status=$?
+set -e
+[[ $missing_updater_key_status -ne 0 ]] || fail "missing updater private key unexpectedly passed"
+assert_contains "$missing_updater_key_output" "TAURI_SIGNING_PRIVATE_KEY"
+[[ "$missing_updater_key_output" != *"TAURI_SIGNING_PRIVATE_KEY_PASSWORD"* ]] || fail "present updater password was reported missing"
+[[ "$missing_updater_key_output" != *"private-key-password-secret-value"* ]] || fail "updater password leaked into output"
+pass_count=$((pass_count + 1))
+
+set +e
+missing_updater_password_output="$(
+  TAURI_SIGNING_PRIVATE_KEY='private-key-secret-value' \
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD='' \
+  "$updater_signing_script" 2>&1
+)"
+missing_updater_password_status=$?
+set -e
+[[ $missing_updater_password_status -ne 0 ]] || fail "missing updater private key password unexpectedly passed"
+assert_contains "$missing_updater_password_output" "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+[[ "$missing_updater_password_output" != *"private-key-secret-value"* ]] || fail "updater private key leaked into output"
 pass_count=$((pass_count + 1))
 
 make_version_fixture "0.4.1" "0.4.2" "0.4.1"
@@ -115,6 +153,43 @@ grep -Fq '^[0-9]+\.[0-9]+\.[0-9]+$' "$release_workflow" || fail "strict X.Y.Z re
 if grep -qE 'seq 1 100|LATEST_MINOR|NEXT_MINOR' "$release_workflow"; then
   fail "legacy four-component release fallback remains"
 fi
+pass_count=$((pass_count + 1))
+
+build_workflow="$repo_root/.github/workflows/build.yml"
+grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$build_workflow" || fail "build does not pass updater private key to Tauri"
+grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$build_workflow" || fail "build does not pass updater private key password to Tauri"
+grep -Fq "if: contains(inputs.platform, 'macos') && inputs.sign-binaries" "$build_workflow" || fail "Apple signing is not conditional on sign-binaries"
+
+grep -Fq 'platform: "macos-14"' "$release_workflow" || fail "release is not pinned to a macOS Apple Silicon runner"
+grep -Fq 'target: "aarch64-apple-darwin"' "$release_workflow" || fail "release target is not Apple Silicon"
+grep -Fq 'build-args: "--target aarch64-apple-darwin"' "$release_workflow" || fail "release build args are not Apple Silicon"
+grep -Fq 'sign-binaries: false' "$release_workflow" || fail "release must not Apple-codesign binaries"
+if grep -qE 'matrix:|windows-latest|x86_64-pc-windows-msvc' "$release_workflow"; then
+  fail "release workflow still contains a matrix or Windows build"
+fi
+if grep -q 'check-apple-signing-secrets.sh' "$release_workflow"; then
+  fail "release workflow still unconditionally checks Apple signing credentials"
+fi
+
+updater_check_line="$(grep -n 'check-updater-signing-secrets.sh' "$release_workflow" | head -1 | cut -d: -f1)"
+draft_line="$(grep -n 'Create Draft Release' "$release_workflow" | head -1 | cut -d: -f1)"
+verify_line="$(grep -n 'Verify draft release assets' "$release_workflow" | head -1 | cut -d: -f1)"
+publish_line="$(grep -n 'Publish verified release' "$release_workflow" | head -1 | cut -d: -f1)"
+[[ -n "$updater_check_line" && -n "$draft_line" && "$updater_check_line" -lt "$draft_line" ]] || fail "updater secret preflight must run before draft creation"
+[[ -n "$verify_line" && -n "$publish_line" && "$verify_line" -lt "$publish_line" ]] || fail "publishing must happen after asset verification"
+
+grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$release_workflow" || fail "release does not reference updater private key secret"
+grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$release_workflow" || fail "release does not reference updater password secret"
+grep -Fq '.app.tar.gz.sig' "$release_workflow" || fail "release does not require updater signature asset"
+grep -Fq 'latest.json' "$release_workflow" || fail "release does not require updater manifest"
+grep -Fq '.dmg' "$release_workflow" || fail "release does not require DMG asset"
+grep -Fq '.app.tar.gz' "$release_workflow" || fail "release does not require updater archive"
+grep -Fq "manifest.version !== expectedVersion" "$release_workflow" || fail "latest.json version is not validated"
+grep -Fq "platformKey.includes('darwin')" "$release_workflow" || fail "latest.json Darwin platform is not validated"
+grep -Fq "platformKey.includes('aarch64')" "$release_workflow" || fail "latest.json aarch64 platform is not validated"
+grep -Fq "platform.url.endsWith('.app.tar.gz')" "$release_workflow" || fail "latest.json updater URL is not validated"
+grep -Fq 'github.rest.repos.updateRelease' "$release_workflow" || fail "verified draft is not published"
+grep -Fq 'draft: false' "$release_workflow" || fail "release publish does not clear draft flag"
 pass_count=$((pass_count + 1))
 
 echo "PASS: $pass_count release preflight scenarios"
