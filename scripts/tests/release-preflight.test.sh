@@ -8,6 +8,9 @@ updater_signing_script="$repo_root/scripts/check-updater-signing-secrets.sh"
 fixture_root="$(mktemp -d)"
 trap 'rm -rf "$fixture_root"' EXIT
 
+grep -Eq '^[[:space:]]*packages:' "$repo_root/frontend/pnpm-workspace.yaml" \
+  || { echo "FAIL: frontend pnpm workspace must declare packages for pnpm 11" >&2; exit 1; }
+
 pass_count=0
 
 fail() {
