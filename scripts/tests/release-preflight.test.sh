@@ -46,6 +46,23 @@ assert_contains "$mismatch_output" "Version mismatch"
 assert_contains "$mismatch_output" "tauri.conf.json: 0.4.2"
 pass_count=$((pass_count + 1))
 
+tauri_config="$repo_root/frontend/src-tauri/tauri.conf.json"
+node -e '
+  const fs = require("fs");
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  if (config.bundle?.createUpdaterArtifacts !== true) {
+    throw new Error("bundle.createUpdaterArtifacts must be true");
+  }
+  const expected = "https://github.com/honzavoz/meetily-recordonly/releases/latest/download/latest.json";
+  if (!Array.isArray(config.plugins?.updater?.endpoints) || !config.plugins.updater.endpoints.includes(expected)) {
+    throw new Error("GitHub latest.json updater endpoint is missing");
+  }
+  if (typeof config.plugins?.updater?.pubkey !== "string" || config.plugins.updater.pubkey.trim() === "") {
+    throw new Error("updater public key is missing");
+  }
+' "$tauri_config"
+pass_count=$((pass_count + 1))
+
 complete_output="$(
   APPLE_CERTIFICATE=certificate \
   APPLE_CERTIFICATE_PASSWORD=password \
