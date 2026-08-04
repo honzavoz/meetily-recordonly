@@ -137,7 +137,7 @@ jobs:
 
   verify-and-publish:
     needs: [create-release, build-macos-apple-silicon]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     environment: release
@@ -160,6 +160,8 @@ jobs:
             const repo = context.repo.repo
             const expectedTag = `v${expectedVersion}`
             const { verifyUpdaterReleaseAssets } = require('./scripts/verify-updater-release-assets.js')
+            const fs = require('node:fs')
+            const path = require('node:path')
 
             const { data: release } = await github.rest.repos.getRelease({
               owner,
@@ -181,31 +183,62 @@ jobs:
             })
             const manifestAsset = assets.find(asset => asset.name === 'latest.json')
             const signatureAsset = assets.find(asset => asset.name.endsWith('.app.tar.gz.sig'))
-            const downloadText = async asset => {
-              if (!asset) return ''
+            const downloadBytes = async asset => {
+              if (!asset) return Buffer.alloc(0)
               const response = await github.request('GET /repos/{owner}/{repo}/releases/assets/{asset_id}', {
                 owner,
                 repo,
                 asset_id: asset.id,
                 headers: { accept: 'application/octet-stream' }
               })
-              return Buffer.from(response.data).toString('utf8')
+              return Buffer.from(response.data)
             }
-            const [manifestText, signatureText] = await Promise.all([
-              downloadText(manifestAsset),
-              downloadText(signatureAsset)
+            const [manifestBytes, signatureBytes] = await Promise.all([
+              downloadBytes(manifestAsset),
+              downloadBytes(signatureAsset)
             ])
-            verifyUpdaterReleaseAssets({
+            const verified = verifyUpdaterReleaseAssets({
               assets,
-              manifestText,
-              signatureText,
+              manifestText: manifestBytes.toString('utf8'),
+              signatureText: signatureBytes.toString('utf8'),
               expectedVersion,
               expectedOwner: owner,
               expectedRepo: repo,
               expectedTag
             })
 
+            const [archiveBytes, verifiedSignatureBytes] = await Promise.all([
+              downloadBytes(verified.archive),
+              downloadBytes(verified.signature)
+            ])
+            const verificationDirectory = path.join(process.env.RUNNER_TEMP, 'updater-verification')
+            fs.mkdirSync(verificationDirectory, { recursive: true, mode: 0o700 })
+            fs.writeFileSync(path.join(verificationDirectory, 'updater.app.tar.gz'), archiveBytes, { mode: 0o600 })
+            fs.writeFileSync(path.join(verificationDirectory, 'updater.app.tar.gz.sig'), verifiedSignatureBytes, { mode: 0o600 })
+
             core.info(`Verified ${assets.length} draft assets and latest.json for ${expectedVersion}`)
+
+      - name: Install minisign verifier
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y minisign
+          command -v minisign >/dev/null
+          dpkg-query -W -f='Installed minisign version: ${Version}\n' minisign
+
+      - name: Extract configured updater public key
+        shell: bash
+        run: |
+          ./scripts/extract-updater-public-key.js \
+            frontend/src-tauri/tauri.conf.json \
+            "$RUNNER_TEMP/updater-verification/updater.pub"
+
+      - name: Cryptographically verify updater archive
+        shell: bash
+        run: |
+          minisign -Vm "$RUNNER_TEMP/updater-verification/updater.app.tar.gz" \
+            -x "$RUNNER_TEMP/updater-verification/updater.app.tar.gz.sig" \
+            -p "$RUNNER_TEMP/updater-verification/updater.pub"
 
       - name: Publish verified release
         uses: actions/github-script@v7

@@ -158,6 +158,7 @@ pass_count=$((pass_count + 1))
 build_workflow="$repo_root/.github/workflows/build.yml"
 build_test_workflow="$repo_root/.github/workflows/build-test.yml"
 asset_verifier="$repo_root/scripts/verify-updater-release-assets.js"
+pubkey_extractor="$repo_root/scripts/extract-updater-public-key.js"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$build_workflow" || fail "build does not pass updater private key to Tauri"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$build_workflow" || fail "build does not pass updater private key password to Tauri"
 grep -Fq "if: contains(inputs.platform, 'macos') && inputs.sign-binaries" "$build_workflow" || fail "Apple signing is not conditional on sign-binaries"
@@ -178,9 +179,13 @@ branch_gate_line="$(grep -n 'Require default branch release' "$release_workflow"
 draft_line="$(grep -n 'Create Draft Release' "$release_workflow" | head -1 | cut -d: -f1)"
 verify_line="$(grep -n 'Verify draft release assets' "$release_workflow" | head -1 | cut -d: -f1)"
 publish_line="$(grep -n 'Publish verified release' "$release_workflow" | head -1 | cut -d: -f1)"
+crypto_verify_line="$(grep -n 'Cryptographically verify updater archive' "$release_workflow" | head -1 | cut -d: -f1)"
+draft_false_line="$(grep -n 'draft: false' "$release_workflow" | tail -1 | cut -d: -f1)"
 [[ -n "$updater_check_line" && -n "$draft_line" && "$updater_check_line" -lt "$draft_line" ]] || fail "updater secret preflight must run before draft creation"
 [[ -n "$branch_gate_line" && -n "$updater_check_line" && "$branch_gate_line" -lt "$updater_check_line" ]] || fail "default branch gate must run before updater secrets are accessed"
 [[ -n "$verify_line" && -n "$publish_line" && "$verify_line" -lt "$publish_line" ]] || fail "publishing must happen after asset verification"
+[[ -n "$crypto_verify_line" && -n "$publish_line" && "$crypto_verify_line" -lt "$publish_line" ]] || fail "publishing must happen after cryptographic archive verification"
+[[ -n "$crypto_verify_line" && -n "$draft_false_line" && "$crypto_verify_line" -lt "$draft_false_line" ]] || fail "draft:false must happen after cryptographic archive verification"
 
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}' "$release_workflow" || fail "release does not reference updater private key secret"
 grep -Fq 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}' "$release_workflow" || fail "release does not reference updater password secret"
@@ -226,6 +231,26 @@ if grep -Eq 'deployment-environment:.*release' "$build_test_workflow"; then
   fail "normal build-test must not gain access to the release environment"
 fi
 grep -Fq 'uses: ./.github/workflows/build.yml' "$build_test_workflow" || fail "normal build-test no longer exercises reusable build defaults"
+[[ -x "$pubkey_extractor" ]] || fail "updater public key extractor is missing or not executable"
+grep -Fq "config.plugins?.updater?.pubkey" "$pubkey_extractor" || fail "public key extractor does not read the exact Tauri updater pubkey"
+grep -Fq 'verified.archive' "$release_workflow" || fail "workflow does not download the exact metadata-verified updater archive"
+grep -Fq 'updater.app.tar.gz' "$release_workflow" || fail "workflow does not persist the updater archive for crypto verification"
+grep -Fq 'extract-updater-public-key.js' "$release_workflow" || fail "workflow does not extract the configured updater public key"
+grep -Fq 'apt-get install --no-install-recommends -y minisign' "$release_workflow" || fail "workflow does not install minisign from the pinned Ubuntu repository"
+grep -Fq 'dpkg-query' "$release_workflow" || fail "workflow does not report the repository minisign version"
+grep -Fq 'command -v minisign' "$release_workflow" || fail "workflow does not verify minisign tool availability"
+grep -Fq 'minisign -Vm' "$release_workflow" || fail "workflow does not cryptographically verify the updater archive"
+pass_count=$((pass_count + 1))
+
+extracted_pubkey="$fixture_root/updater.pub"
+"$pubkey_extractor" "$tauri_config" "$extracted_pubkey" >/dev/null
+node -e '
+  const fs = require("fs");
+  const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const expected = Buffer.from(config.plugins.updater.pubkey, "base64");
+  const actual = fs.readFileSync(process.argv[2]);
+  if (!actual.equals(expected)) throw new Error("extracted updater public key differs from tauri.conf.json");
+' "$tauri_config" "$extracted_pubkey"
 pass_count=$((pass_count + 1))
 
 if command -v ruby >/dev/null 2>&1; then
