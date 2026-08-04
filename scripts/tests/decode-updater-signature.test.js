@@ -31,6 +31,14 @@ try {
   assert.equal(valid.status, 0, valid.stderr)
   assert.equal(valid.output, textualSignature)
 
+  const tauriSignature = textualSignature.replace(
+    'signature from minisign secret key',
+    'signature from tauri secret key'
+  )
+  const validTauri = decodeFixture(Buffer.from(tauriSignature).toString('base64'))
+  assert.equal(validTauri.status, 0, validTauri.stderr)
+  assert.equal(validTauri.output, tauriSignature)
+
   const nonCanonical = decodeFixture(`${encodedSignature}\n`)
   assert.notEqual(nonCanonical.status, 0)
   assert.match(nonCanonical.stderr, /canonical base64/i)

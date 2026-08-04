@@ -21,8 +21,9 @@ if (canonicalDecoded !== encodedSignature) {
 }
 
 const signatureText = decodedSignature.toString('utf8')
-const minisignHeader = 'untrusted comment: signature from minisign secret key\n'
-if (!signatureText.startsWith(minisignHeader) || !/^R[A-Za-z0-9+/]+=*(?:\n|$)/.test(signatureText.slice(minisignHeader.length))) {
+const signatureHeader = /^untrusted comment: signature from (?:minisign|tauri) secret key\n/
+const headerMatch = signatureText.match(signatureHeader)
+if (!headerMatch || !/^R[A-Za-z0-9+/]+=*(?:\n|$)/.test(signatureText.slice(headerMatch[0].length))) {
   throw new Error('Decoded updater signature is not in the expected minisign signature format')
 }
 
