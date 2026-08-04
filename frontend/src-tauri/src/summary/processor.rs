@@ -8,12 +8,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 // Compile regex once and reuse (significant performance improvement for repeated calls)
-static THINKING_TAG_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap()
-});
+static THINKING_TAG_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").unwrap());
 
 const ENGLISH_BASE_SUMMARY_INSTRUCTION: &str =
     "**Write the summary/report in English regardless of transcript language; non-English prose is invalid.**";
+const TRANSLATION_CHUNK_MAX_CHARS: usize = 6_000;
 
 fn resolve_cached_english<'a>(
     cached: Option<&'a str>,
@@ -23,7 +23,11 @@ fn resolve_cached_english<'a>(
     let target_is_translation = summary_language
         .and_then(language_name_from_code)
         .is_some_and(|n| n != "English");
-    if target_is_translation { Some(cached_clean) } else { None }
+    if target_is_translation {
+        Some(cached_clean)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +255,94 @@ pub fn chunk_text(text: &str, chunk_size_tokens: usize, overlap_tokens: usize) -
     chunks
 }
 
+/// Splits Markdown into bounded, non-overlapping translation chunks.
+///
+/// Blank-line boundaries are preferred, then ordinary line boundaries outside
+/// fenced code blocks. A Unicode-safe hard split is only used when a single
+/// Markdown block (including an oversized fence) exceeds the limit.
+fn chunk_markdown_for_translation(markdown: &str, max_chars: usize) -> Vec<&str> {
+    if max_chars == 0 {
+        return Vec::new();
+    }
+
+    if markdown.chars().count() <= max_chars {
+        return vec![markdown];
+    }
+
+    let mut line_boundaries = Vec::new();
+    let mut block_boundaries = Vec::new();
+    let mut byte_offset = 0;
+    let mut fence_marker: Option<char> = None;
+
+    for line in markdown.split_inclusive('\n') {
+        byte_offset += line.len();
+        let trimmed = line.trim_start();
+        let marker = if trimmed.starts_with("```") {
+            Some('`')
+        } else if trimmed.starts_with("~~~") {
+            Some('~')
+        } else {
+            None
+        };
+
+        if let Some(marker) = marker {
+            match fence_marker {
+                Some(open_marker) if open_marker == marker => fence_marker = None,
+                None => fence_marker = Some(marker),
+                _ => {}
+            }
+        }
+
+        if fence_marker.is_none() {
+            line_boundaries.push(byte_offset);
+            if line.trim().is_empty() {
+                block_boundaries.push(byte_offset);
+            }
+        }
+    }
+
+    if fence_marker.is_none() && line_boundaries.last().copied() != Some(markdown.len()) {
+        line_boundaries.push(markdown.len());
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < markdown.len() {
+        let hard_end = markdown[start..]
+            .char_indices()
+            .nth(max_chars)
+            .map_or(markdown.len(), |(offset, _)| start + offset);
+
+        let preferred_end = block_boundaries
+            .iter()
+            .copied()
+            .filter(|boundary| *boundary > start && *boundary <= hard_end)
+            .next_back()
+            .or_else(|| {
+                line_boundaries
+                    .iter()
+                    .copied()
+                    .filter(|boundary| *boundary > start && *boundary <= hard_end)
+                    .next_back()
+            })
+            .unwrap_or(hard_end);
+
+        chunks.push(&markdown[start..preferred_end]);
+        start = preferred_end;
+    }
+
+    chunks
+}
+
+fn restore_trailing_whitespace(original_chunk: &str, translated_chunk: &str) -> String {
+    let suffix_start = original_chunk
+        .char_indices()
+        .rev()
+        .find(|(_, character)| !character.is_whitespace())
+        .map_or(0, |(offset, character)| offset + character.len_utf8());
+    format!("{translated_chunk}{}", &original_chunk[suffix_start..])
+}
+
 /// Cleans markdown output from LLM by removing thinking tags and code fences
 ///
 /// # Arguments
@@ -357,7 +449,10 @@ pub async fn generate_meeting_summary(
     let (mut english_markdown, successful_chunk_count) = if let Some(cached) =
         resolve_cached_english(cached_english, summary_language)
     {
-        info!("✓ Using cached English summary ({} chars), skipping pass 1", cached.len());
+        info!(
+            "✓ Using cached English summary ({} chars), skipping pass 1",
+            cached.len()
+        );
         (cached.to_string(), 1_i64)
     } else {
         let content_to_summarize: String;
@@ -366,7 +461,9 @@ pub async fn generate_meeting_summary(
         // Strategy: Use single-pass for cloud providers or short transcripts
         // Use multi-level chunking for Ollama/BuiltInAI with long transcripts
         // Note: CustomOpenAI is treated like cloud providers (unlimited context)
-        if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI) || total_tokens < token_threshold {
+        if (provider != &LLMProvider::Ollama && provider != &LLMProvider::BuiltInAI)
+            || total_tokens < token_threshold
+        {
             info!(
                 "Using single-pass summarization (tokens: {}, threshold: {})",
                 total_tokens, token_threshold
@@ -391,7 +488,11 @@ pub async fn generate_meeting_summary(
                 // Check for cancellation before processing each chunk
                 if let Some(token) = cancellation_token {
                     if token.is_cancelled() {
-                        info!("Summary generation cancelled during chunk {}/{}", i + 1, num_chunks);
+                        info!(
+                            "Summary generation cancelled during chunk {}/{}",
+                            i + 1,
+                            num_chunks
+                        );
                         return Err("Summary generation was cancelled".to_string());
                     }
                 }
@@ -473,7 +574,10 @@ pub async fn generate_meeting_summary(
             };
         }
 
-        info!("Generating final markdown report with template: {}", template_id);
+        info!(
+            "Generating final markdown report with template: {}",
+            template_id
+        );
 
         // Generate markdown structure and section instructions using template methods
         let clean_template_markdown = template.to_markdown_structure();
@@ -482,9 +586,8 @@ pub async fn generate_meeting_summary(
         let final_system_prompt =
             build_final_report_system_prompt(&section_instructions, &clean_template_markdown);
 
-        let mut final_user_prompt = format!(
-            "<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n"
-        );
+        let mut final_user_prompt =
+            format!("<transcript_chunks>\n{content_to_summarize}\n</transcript_chunks>\n");
 
         if !custom_prompt.is_empty() {
             final_user_prompt.push_str("\n\nUser Provided Context:\n\n<user_context>\n");
@@ -523,7 +626,10 @@ pub async fn generate_meeting_summary(
         (english_markdown, successful_chunk_count)
     };
 
-    let final_markdown = match resolve_final_language_action(summary_language, detected_transcript_language) {
+    let final_markdown = match resolve_final_language_action(
+        summary_language,
+        detected_transcript_language,
+    ) {
         FinalLanguageAction::Translate(name) => {
             match translate_markdown(
                 client,
@@ -642,27 +748,41 @@ async fn translate_markdown(
     info!("Translation pass: target language = {}", target_language);
 
     let system_prompt = translation_system_prompt(target_language);
-    let user_prompt = format!(
-        "Translate the following Markdown document into {target_language}. Return ONLY the translated Markdown, nothing else.\n\n<document>\n{english_markdown}\n</document>"
+    let chunks = chunk_markdown_for_translation(english_markdown, TRANSLATION_CHUNK_MAX_CHARS);
+    let chunk_count = chunks.len();
+    info!(
+        "Translation pass split Markdown into {} chunk(s)",
+        chunk_count
     );
 
-    run_markdown_transform(
-        client,
-        provider,
-        model_name,
-        api_key,
-        &system_prompt,
-        &user_prompt,
-        "Translation pass",
-        ollama_endpoint,
-        custom_openai_endpoint,
-        max_tokens,
-        temperature,
-        top_p,
-        app_data_dir,
-        cancellation_token,
-    )
-    .await
+    let mut translated_markdown = String::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        info!("Translating Markdown chunk {}/{}", index + 1, chunk_count);
+        let user_prompt = format!(
+            "Translate the following Markdown document into {target_language}. Return ONLY the translated Markdown, nothing else.\n\n<document>\n{chunk}\n</document>"
+        );
+        let failure_label = format!("Translation pass chunk {}/{}", index + 1, chunk_count);
+        let translated_chunk = run_markdown_transform(
+            client,
+            provider,
+            model_name,
+            api_key,
+            &system_prompt,
+            &user_prompt,
+            &failure_label,
+            ollama_endpoint,
+            custom_openai_endpoint,
+            max_tokens,
+            temperature,
+            top_p,
+            app_data_dir,
+            cancellation_token,
+        )
+        .await?;
+        translated_markdown.push_str(&restore_trailing_whitespace(chunk, &translated_chunk));
+    }
+
+    Ok(translated_markdown)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -708,6 +828,71 @@ async fn normalize_markdown_to_english(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_markdown_translation_stays_in_one_chunk() {
+        let markdown = "# Meeting\n\nA short report.\n";
+
+        assert_eq!(
+            chunk_markdown_for_translation(markdown, 1_000),
+            vec![markdown]
+        );
+    }
+
+    #[test]
+    fn translation_chunks_prefer_markdown_block_boundaries_and_preserve_all_text() {
+        let markdown = "# Meeting\n\nFirst paragraph.\n\n## Actions\n\n- One\n- Two\n";
+        let chunks = chunk_markdown_for_translation(markdown, 24);
+
+        assert_eq!(chunks.concat(), markdown);
+        assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 24));
+        assert_eq!(
+            chunks,
+            vec![
+                "# Meeting\n\n",
+                "First paragraph.\n\n",
+                "## Actions\n\n",
+                "- One\n- Two\n"
+            ]
+        );
+    }
+
+    #[test]
+    fn translation_chunks_do_not_split_a_fenced_code_block_when_it_fits() {
+        let markdown = "Intro.\n\n```rust\nfn main() {}\n```\n\nClosing paragraph.\n";
+        let chunks = chunk_markdown_for_translation(markdown, 36);
+
+        assert_eq!(chunks.concat(), markdown);
+        assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 36));
+        assert!(chunks
+            .iter()
+            .any(|chunk| chunk.contains("```rust\nfn main() {}\n```")));
+        assert!(!chunks.iter().any(|chunk| chunk.matches("```").count() == 1));
+    }
+
+    #[test]
+    fn oversized_markdown_block_uses_unicode_safe_bounded_fallback() {
+        let markdown = "# Přehled\n\nŽluťoučký kůň pěl příliš dlouhou ódu bez dalšího oddělovače.";
+        let chunks = chunk_markdown_for_translation(markdown, 18);
+
+        assert_eq!(chunks.concat(), markdown);
+        assert!(chunks.len() > 1);
+        assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 18));
+    }
+
+    #[test]
+    fn translated_chunks_restore_original_markdown_separators() {
+        let originals = ["# Heading\n\n", "Body paragraph.\n"];
+        let translated = ["# Nadpis", "Odstavec."];
+
+        let reassembled = originals
+            .iter()
+            .zip(translated)
+            .map(|(original, translated)| restore_trailing_whitespace(original, translated))
+            .collect::<String>();
+
+        assert_eq!(reassembled, "# Nadpis\n\nOdstavec.\n");
+    }
 
     #[test]
     fn chunk_summary_prompt_forces_english_base_output() {
@@ -785,13 +970,11 @@ mod tests {
 
     #[test]
     fn cancelled_english_normalization_is_not_swallowed() {
-        assert!(
-            english_markdown_after_normalization_result(
-                "# Original",
-                Err("Summary generation was cancelled".to_string())
-            )
-            .is_err()
-        );
+        assert!(english_markdown_after_normalization_result(
+            "# Original",
+            Err("Summary generation was cancelled".to_string())
+        )
+        .is_err());
     }
 
     // resolve_cached_english matrix -------------------------------------------
@@ -829,18 +1012,27 @@ mod tests {
 
     #[test]
     fn valid_cache_french_target_returns_cache() {
-        assert_eq!(resolve_cached_english(Some("body"), Some("fr")), Some("body"));
+        assert_eq!(
+            resolve_cached_english(Some("body"), Some("fr")),
+            Some("body")
+        );
     }
 
     #[test]
     fn valid_cache_unknown_language_returns_none() {
         // Unknown code -> language_name_from_code returns None -> not a translation
-        assert_eq!(resolve_cached_english(Some("body"), Some("zz-unknown")), None);
+        assert_eq!(
+            resolve_cached_english(Some("body"), Some("zz-unknown")),
+            None
+        );
     }
 
     #[test]
     fn uppercase_translation_code_returns_cache() {
-        assert_eq!(resolve_cached_english(Some("body"), Some("FR")), Some("body"));
+        assert_eq!(
+            resolve_cached_english(Some("body"), Some("FR")),
+            Some("body")
+        );
     }
 
     #[test]
