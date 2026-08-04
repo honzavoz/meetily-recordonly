@@ -459,6 +459,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          if [[ ${#TAURI_SIGNING_PRIVATE_KEY} -ne 348 ]]; then
+            echo "Updater private key has an unexpected encoded length: ${#TAURI_SIGNING_PRIVATE_KEY}" >&2
+            exit 1
+          fi
+          if ! printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 --decode | head -n 1 | grep -Fxq 'untrusted comment: rsign encrypted secret key'; then
+            echo "Updater private key does not decode to the expected Tauri key format" >&2
+            exit 1
+          fi
+          if [[ ${#TAURI_SIGNING_PRIVATE_KEY_PASSWORD} -ne 48 ]]; then
+            echo "Updater private key password has an unexpected length: ${#TAURI_SIGNING_PRIVATE_KEY_PASSWORD}" >&2
+            exit 1
+          fi
           probe="$RUNNER_TEMP/meetily-updater-signing-probe"
           : > "$probe"
           frontend/node_modules/.bin/tauri signer sign "$probe" >/dev/null
