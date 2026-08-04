@@ -211,7 +211,7 @@ grep -Fq '.app.tar.gz' "$asset_verifier" || fail "release does not require updat
 grep -Fq "manifest.version !== expectedVersion" "$asset_verifier" || fail "latest.json version is not validated"
 grep -Fq "platforms['darwin-aarch64']" "$asset_verifier" || fail "latest.json canonical darwin-aarch64 platform is not validated"
 grep -Fq "platforms['darwin-aarch64-app']" "$asset_verifier" || fail "latest.json darwin-aarch64-app alias is not validated when present"
-grep -Fq 'entry.url !== archive.browser_download_url' "$asset_verifier" || fail "latest.json updater URL is not validated exactly"
+grep -Fq 'entry.url !== expectedArchiveUrl' "$asset_verifier" || fail "latest.json updater URL is not validated exactly"
 grep -Fq 'github.rest.repos.updateRelease' "$release_workflow" || fail "verified draft is not published"
 grep -Fq 'draft: false' "$release_workflow" || fail "release publish does not clear draft flag"
 grep -Fq 'github.ref_name' "$release_workflow" || fail "release does not gate execution to the default branch"

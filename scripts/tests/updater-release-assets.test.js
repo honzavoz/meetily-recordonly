@@ -42,6 +42,11 @@ function expectFailure(label, mutate, pattern) {
 const verified = verifyUpdaterReleaseAssets(fixture())
 assert.equal(verified.archive.name, archiveName)
 
+const draftFixture = fixture()
+draftFixture.assets.find(asset => asset.name === archiveName).browser_download_url =
+  `https://github.com/honzavoz/meetily-recordonly/releases/download/untagged-2486ef2feb0fc4ba4275/${archiveName}`
+assert.equal(verifyUpdaterReleaseAssets(draftFixture).archive.name, archiveName)
+
 const aliasFixture = fixture()
 const aliasManifest = JSON.parse(aliasFixture.manifestText)
 aliasManifest.platforms['darwin-aarch64-app'] = { url: archiveUrl, signature }
@@ -60,7 +65,7 @@ expectFailure('wrong repository URL', input => {
   const manifest = JSON.parse(input.manifestText)
   manifest.platforms['darwin-aarch64'].url = archive.browser_download_url
   input.manifestText = JSON.stringify(manifest)
-}, /must use honzavoz\/meetily-recordonly tag/i)
+}, /canonical updater URL/i)
 
 expectFailure('wrong tag URL', input => {
   const archive = input.assets.find(asset => asset.name === archiveName)
@@ -68,13 +73,13 @@ expectFailure('wrong tag URL', input => {
   const manifest = JSON.parse(input.manifestText)
   manifest.platforms['darwin-aarch64'].url = archive.browser_download_url
   input.manifestText = JSON.stringify(manifest)
-}, /must use honzavoz\/meetily-recordonly tag v0\.4\.5/i)
+}, /canonical updater URL/i)
 
 expectFailure('manifest URL differs from asset URL', input => {
   const manifest = JSON.parse(input.manifestText)
   manifest.platforms['darwin-aarch64'].url = `${archiveUrl}.wrong`
   input.manifestText = JSON.stringify(manifest)
-}, /exactly match.*asset URL/i)
+}, /exactly match.*canonical updater URL/i)
 
 expectFailure('wrong architecture', input => {
   const manifest = JSON.parse(input.manifestText)

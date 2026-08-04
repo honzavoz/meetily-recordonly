@@ -39,9 +39,7 @@ function verifyUpdaterReleaseAssets(input) {
   const manifestAsset = exactlyOne(assets, asset => asset.name === 'latest.json', 'latest.json asset')
 
   const expectedUrlPrefix = `https://github.com/${expectedOwner}/${expectedRepo}/releases/download/${expectedTag}/`
-  if (typeof archive.browser_download_url !== 'string' || !archive.browser_download_url.startsWith(expectedUrlPrefix)) {
-    throw new Error(`Updater archive URL must use ${expectedOwner}/${expectedRepo} tag ${expectedTag}`)
-  }
+  const expectedArchiveUrl = `${expectedUrlPrefix}${archive.name}`
 
   let manifest
   try {
@@ -63,8 +61,8 @@ function verifyUpdaterReleaseAssets(input) {
     if (!entry || typeof entry !== 'object') {
       throw new Error(`latest.json ${platformName} entry is invalid`)
     }
-    if (entry.url !== archive.browser_download_url) {
-      throw new Error(`latest.json ${platformName} URL must exactly match the aarch64 updater release asset URL`)
+    if (entry.url !== expectedArchiveUrl) {
+      throw new Error(`latest.json ${platformName} URL must exactly match the canonical updater URL`)
     }
     if (typeof entry.signature !== 'string' || !entry.signature) {
       throw new Error(`latest.json ${platformName} signature is empty`)
