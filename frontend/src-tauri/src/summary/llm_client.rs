@@ -7,6 +7,13 @@ use tracing::info;
 
 const REQUEST_TIMEOUT_DURATION: Duration = Duration::from_secs(300);
 
+fn request_timeout_error() -> String {
+    format!(
+        "LLM request timed out after {} seconds",
+        REQUEST_TIMEOUT_DURATION.as_secs()
+    )
+}
+
 // Generic structure for OpenAI-compatible API chat messages
 #[derive(Debug, Serialize)]
 pub struct ChatMessage {
@@ -269,7 +276,7 @@ pub async fn generate_summary(
             result = request_future => {
                 result.map_err(|e| {
                     if e.is_timeout() {
-                        format!("LLM request timed out after 60 seconds")
+                        request_timeout_error()
                     } else {
                         format!("Failed to send request to LLM: {}", e)
                     }
@@ -282,7 +289,7 @@ pub async fn generate_summary(
     } else {
         request_future.await.map_err(|e| {
             if e.is_timeout() {
-                format!("LLM request timed out after 60 seconds")
+                request_timeout_error()
             } else {
                 format!("Failed to send request to LLM: {}", e)
             }
@@ -342,5 +349,29 @@ fn provider_name(provider: &LLMProvider) -> &str {
         LLMProvider::BuiltInAI => "Built-in AI",
         LLMProvider::OpenRouter => "OpenRouter",
         LLMProvider::CustomOpenAI => "Custom OpenAI",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_timeout_error_uses_configured_duration() {
+        assert_eq!(
+            request_timeout_error(),
+            format!(
+                "LLM request timed out after {} seconds",
+                REQUEST_TIMEOUT_DURATION.as_secs()
+            )
+        );
+    }
+
+    #[test]
+    fn request_timeout_error_reports_current_five_minute_timeout() {
+        assert_eq!(
+            request_timeout_error(),
+            "LLM request timed out after 300 seconds"
+        );
     }
 }

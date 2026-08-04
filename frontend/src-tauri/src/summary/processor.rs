@@ -3,6 +3,7 @@ use crate::summary::templates::Template;
 use once_cell::sync::Lazy;
 use regex::Regex;
 use reqwest::Client;
+use std::future::Future;
 use std::path::PathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -759,6 +760,31 @@ async fn run_markdown_transform(
     Ok(clean_markdown_transform_output(source_markdown, &raw))
 }
 
+fn is_translation_timeout_error(error: &str) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    if normalized.contains("cancelled") || normalized.contains("canceled") {
+        return false;
+    }
+
+    normalized.contains("timed out") || normalized.contains("timeout")
+}
+
+async fn retry_translation_timeout_once<T, F, Fut>(mut operation: F) -> Result<T, String>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, String>>,
+{
+    let first_result = operation().await;
+    match first_result {
+        Err(error) if is_translation_timeout_error(&error) => operation().await,
+        result => result,
+    }
+}
+
+fn translation_section_error(current: usize, total: usize, error: &str) -> String {
+    format!("Translation section {current}/{total} failed: {error}")
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn translate_markdown(
     client: &Client,
@@ -791,25 +817,27 @@ async fn translate_markdown(
         let user_prompt = format!(
             "Translate the following Markdown document into {target_language}. Return ONLY the translated Markdown, nothing else.\n\n<document>\n{chunk}\n</document>"
         );
-        let failure_label = format!("Translation pass chunk {}/{}", index + 1, chunk_count);
-        let translated_chunk = run_markdown_transform(
-            client,
-            provider,
-            model_name,
-            api_key,
-            &system_prompt,
-            &user_prompt,
-            chunk,
-            &failure_label,
-            ollama_endpoint,
-            custom_openai_endpoint,
-            max_tokens,
-            temperature,
-            top_p,
-            app_data_dir,
-            cancellation_token,
-        )
-        .await?;
+        let translated_chunk = retry_translation_timeout_once(|| {
+            run_markdown_transform(
+                client,
+                provider,
+                model_name,
+                api_key,
+                &system_prompt,
+                &user_prompt,
+                chunk,
+                "Translation pass",
+                ollama_endpoint,
+                custom_openai_endpoint,
+                max_tokens,
+                temperature,
+                top_p,
+                app_data_dir,
+                cancellation_token,
+            )
+        })
+        .await
+        .map_err(|error| translation_section_error(index + 1, chunk_count, &error))?;
         translated_markdown.push_str(&restore_boundary_whitespace(chunk, &translated_chunk));
     }
 
@@ -860,6 +888,85 @@ async fn normalize_markdown_to_english(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn translation_retry_classifies_timeout_but_never_cancellation() {
+        assert!(is_translation_timeout_error(
+            "LLM request timed out after 300 seconds"
+        ));
+        assert!(is_translation_timeout_error(
+            "provider request failed: operation timeout"
+        ));
+        assert!(!is_translation_timeout_error(
+            "Summary generation was cancelled after a timeout"
+        ));
+        assert!(!is_translation_timeout_error("LLM API request failed: 429"));
+    }
+
+    #[tokio::test]
+    async fn translation_timeout_is_retried_exactly_once() {
+        let mut attempts = 0;
+
+        let result = retry_translation_timeout_once(|| {
+            attempts += 1;
+            let attempt = attempts;
+            async move {
+                if attempt == 1 {
+                    Err("LLM request timed out after 300 seconds".to_string())
+                } else {
+                    Ok("translated".to_string())
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(result.unwrap(), "translated");
+        assert_eq!(attempts, 2);
+    }
+
+    #[tokio::test]
+    async fn repeated_translation_timeout_stops_after_second_attempt() {
+        let mut attempts = 0;
+
+        let result: Result<String, String> = retry_translation_timeout_once(|| {
+            attempts += 1;
+            async { Err("LLM request timed out after 300 seconds".to_string()) }
+        })
+        .await;
+
+        assert_eq!(
+            result.unwrap_err(),
+            "LLM request timed out after 300 seconds"
+        );
+        assert_eq!(attempts, 2);
+    }
+
+    #[tokio::test]
+    async fn translation_cancellation_and_other_errors_are_not_retried() {
+        for error in [
+            "Summary generation was cancelled",
+            "LLM API request failed: rate limited",
+        ] {
+            let mut attempts = 0;
+            let result: Result<String, String> = retry_translation_timeout_once(|| {
+                attempts += 1;
+                let error = error.to_string();
+                async move { Err(error) }
+            })
+            .await;
+
+            assert_eq!(result.unwrap_err(), error);
+            assert_eq!(attempts, 1);
+        }
+    }
+
+    #[test]
+    fn terminal_translation_error_includes_section_context_and_cause() {
+        assert_eq!(
+            translation_section_error(2, 4, "LLM API request failed: rate limited"),
+            "Translation section 2/4 failed: LLM API request failed: rate limited"
+        );
+    }
 
     #[test]
     fn short_markdown_translation_stays_in_one_chunk() {
