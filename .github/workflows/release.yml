@@ -233,11 +233,18 @@ jobs:
             frontend/src-tauri/tauri.conf.json \
             "$RUNNER_TEMP/updater-verification/updater.pub"
 
+      - name: Decode updater minisign signature
+        shell: bash
+        run: |
+          ./scripts/decode-updater-signature.js \
+            "$RUNNER_TEMP/updater-verification/updater.app.tar.gz.sig" \
+            "$RUNNER_TEMP/updater-verification/updater.app.tar.gz.minisig"
+
       - name: Cryptographically verify updater archive
         shell: bash
         run: |
           minisign -Vm "$RUNNER_TEMP/updater-verification/updater.app.tar.gz" \
-            -x "$RUNNER_TEMP/updater-verification/updater.app.tar.gz.sig" \
+            -x "$RUNNER_TEMP/updater-verification/updater.app.tar.gz.minisig" \
             -p "$RUNNER_TEMP/updater-verification/updater.pub"
 
       - name: Publish verified release
