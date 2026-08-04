@@ -12,6 +12,10 @@ grep -Eq '^[[:space:]]*packages:' "$repo_root/frontend/pnpm-workspace.yaml" \
   || { echo "FAIL: frontend pnpm workspace must declare packages for pnpm 11" >&2; exit 1; }
 grep -Fq 'Build with Tauri (unsigned app, signed updater)' "$repo_root/.github/workflows/build.yml" \
   || { echo "FAIL: unsigned updater build step is missing" >&2; exit 1; }
+grep -Fq 'Validate updater private key' "$repo_root/.github/workflows/build.yml" \
+  || { echo "FAIL: updater private key must be validated before compilation" >&2; exit 1; }
+grep -Fq 'tauri signer sign' "$repo_root/.github/workflows/build.yml" \
+  || { echo "FAIL: updater private key preflight must parse and use the key" >&2; exit 1; }
 unsigned_tauri_block="$(sed -n '/Build with Tauri (unsigned app, signed updater)/,/Verify signed and notarized macOS app/p' "$repo_root/.github/workflows/build.yml")"
 [[ "$unsigned_tauri_block" != *'APPLE_CERTIFICATE'* ]] \
   || { echo "FAIL: unsigned Tauri build must not receive Apple certificate variables" >&2; exit 1; }

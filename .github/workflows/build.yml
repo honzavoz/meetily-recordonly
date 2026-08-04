@@ -452,6 +452,19 @@ jobs:
           cd frontend
           pnpm install
 
+      - name: Validate updater private key
+        if: ${{ inputs.release-id != '' }}
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          probe="$RUNNER_TEMP/meetily-updater-signing-probe"
+          : > "$probe"
+          frontend/node_modules/.bin/tauri signer sign "$probe" >/dev/null
+          test -s "$probe.sig"
+          rm -f "$probe" "$probe.sig"
+
       - name: rustup install target
         if: ${{ inputs.target != '' && !contains(inputs.target, 'unknown-linux-gnu') && !contains(inputs.target, 'pc-windows-msvc') }}
         run: rustup target add ${{ inputs.target }}
