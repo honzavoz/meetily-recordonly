@@ -49,17 +49,25 @@ impl SummaryProcessesRepository {
         let now = Utc::now();
 
         let summary_update = sqlx::query(
-            "UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?",
+            r#"
+            INSERT INTO summary_processes
+                (meeting_id, status, created_at, updated_at, result, error)
+            VALUES (?, 'completed', ?, ?, ?, NULL)
+            ON CONFLICT(meeting_id) DO UPDATE SET
+                result = excluded.result,
+                updated_at = excluded.updated_at
+            "#,
         )
-        .bind(&result_json.unwrap())
-        .bind(now)
         .bind(meeting_id)
+        .bind(now)
+        .bind(now)
+        .bind(&result_json.unwrap())
         .execute(&mut *transaction)
         .await?;
 
         if summary_update.rows_affected() != 1 {
             log_info!(
-                "Attempted to save summary without a summary process for meeting_id: {}",
+                "Unexpected summary upsert result for meeting_id: {}",
                 meeting_id
             );
             transaction.rollback().await?;
@@ -85,12 +93,10 @@ impl SummaryProcessesRepository {
         pool: &SqlitePool,
         meeting_id: &str,
     ) -> Result<Option<SummaryProcess>, sqlx::Error> {
-        sqlx::query_as::<_, SummaryProcess>(
-            "SELECT p.* FROM summary_processes p JOIN transcript_chunks t ON p.meeting_id = t.meeting_id WHERE p.meeting_id = ?",
-        )
-        .bind(meeting_id)
-        .fetch_optional(pool)
-        .await
+        sqlx::query_as::<_, SummaryProcess>("SELECT * FROM summary_processes WHERE meeting_id = ?")
+            .bind(meeting_id)
+            .fetch_optional(pool)
+            .await
     }
 
     pub async fn create_or_reset_process(
@@ -334,6 +340,17 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE transcript_chunks (
+                id INTEGER PRIMARY KEY,
+                meeting_id TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
     }
 
@@ -346,7 +363,7 @@ mod tests {
             .await
             .unwrap();
         sqlx::query(
-            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result) VALUES (?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result, error) VALUES (?, 'failed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, 'previous generation failed')",
         )
         .bind("meeting-save")
         .bind(r#"{"markdown":"old"}"#)
@@ -361,17 +378,20 @@ mod tests {
                 .unwrap();
 
         assert!(updated);
-        let stored: String =
-            sqlx::query_scalar("SELECT result FROM summary_processes WHERE meeting_id = ?")
-                .bind("meeting-save")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), edited);
+        let stored: (String, String, String) = sqlx::query_as(
+            "SELECT status, error, result FROM summary_processes WHERE meeting_id = ?",
+        )
+        .bind("meeting-save")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored.0, "failed");
+        assert_eq!(stored.1, "previous generation failed");
+        assert_eq!(serde_json::from_str::<Value>(&stored.2).unwrap(), edited);
     }
 
     #[tokio::test]
-    async fn update_meeting_summary_returns_false_without_summary_row() {
+    async fn update_meeting_summary_creates_completed_row_when_missing() {
         let pool = test_pool().await;
         sqlx::query("INSERT INTO meetings (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)")
             .bind("meeting-without-summary")
@@ -379,15 +399,80 @@ mod tests {
             .await
             .unwrap();
 
+        let external_result = serde_json::json!({"markdown": "external result"});
         let updated = SummaryProcessesRepository::update_meeting_summary(
             &pool,
             "meeting-without-summary",
-            &serde_json::json!({"markdown": "edited"}),
+            &external_result,
+        )
+        .await
+        .unwrap();
+
+        assert!(updated);
+        let row: (String, String, i64) = sqlx::query_as(
+            "SELECT status, result, COUNT(*) OVER () FROM summary_processes WHERE meeting_id = ?",
+        )
+        .bind("meeting-without-summary")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "completed");
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.1).unwrap(),
+            external_result
+        );
+        assert_eq!(row.2, 1);
+    }
+
+    #[tokio::test]
+    async fn get_summary_data_for_meeting_does_not_require_transcript_chunks() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO meetings (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)")
+            .bind("record-only-meeting")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result) VALUES (?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+        )
+        .bind("record-only-meeting")
+        .bind(r#"{"markdown":"saved externally"}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let summary =
+            SummaryProcessesRepository::get_summary_data_for_meeting(&pool, "record-only-meeting")
+                .await
+                .unwrap();
+
+        assert!(summary.is_some());
+        assert_eq!(
+            summary.unwrap().result.as_deref(),
+            Some(r#"{"markdown":"saved externally"}"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn update_meeting_summary_rejects_nonexistent_meeting_without_orphan() {
+        let pool = test_pool().await;
+
+        let updated = SummaryProcessesRepository::update_meeting_summary(
+            &pool,
+            "missing-meeting",
+            &serde_json::json!({"markdown": "must not persist"}),
         )
         .await
         .unwrap();
 
         assert!(!updated);
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM summary_processes WHERE meeting_id = ?")
+                .bind("missing-meeting")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[tokio::test]

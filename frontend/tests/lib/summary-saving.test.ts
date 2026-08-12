@@ -118,13 +118,18 @@ describe("summary saving", () => {
     expect(hookSource).not.toContain("else if (aiSummary)");
   });
 
-  test("the summary repository rejects an update that matches no summary row", () => {
+  test("the summary repository creates missing rows and reads them without transcripts", () => {
     const repositorySource = readFileSync(
       new URL("../../src-tauri/src/database/repositories/summary.rs", import.meta.url),
       "utf8",
     );
 
+    expect(repositorySource).toContain("INSERT INTO summary_processes");
+    expect(repositorySource).toContain("ON CONFLICT(meeting_id) DO UPDATE SET");
     expect(repositorySource).toContain("summary_update.rows_affected() != 1");
-    expect(repositorySource).toContain("transaction.rollback().await?");
+    expect(repositorySource).toContain(
+      'sqlx::query_as::<_, SummaryProcess>("SELECT * FROM summary_processes WHERE meeting_id = ?")',
+    );
+    expect(repositorySource).not.toContain("JOIN transcript_chunks");
   });
 });
