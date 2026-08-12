@@ -393,20 +393,27 @@ fn build_menu<R: Runtime>(
 
 pub(crate) fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
     if let Some(window) = app.get_webview_window("main") {
-        if let Err(e) = window.unminimize() {
-            log::error!("Failed to unminimize main window: {}", e);
-        }
+        let window_for_focus = window.clone();
+        if let Err(e) = window.run_on_main_thread(move || {
+            crate::cancel_pending_main_window_hide();
 
-        if let Err(e) = window.show() {
-            log::error!("Failed to show main window: {}", e);
-        }
+            if let Err(e) = window_for_focus.unminimize() {
+                log::error!("Failed to unminimize main window: {}", e);
+            }
 
-        if let Err(e) = window.set_focus() {
-            log::error!("Failed to focus main window: {}", e);
-        }
+            if let Err(e) = window_for_focus.show() {
+                log::error!("Failed to show main window: {}", e);
+            }
 
-        if let Err(e) = window.eval("window.focus()") {
-            log::error!("Failed to focus main webview: {}", e);
+            if let Err(e) = window_for_focus.set_focus() {
+                log::error!("Failed to focus main window: {}", e);
+            }
+
+            if let Err(e) = window_for_focus.eval("window.focus()") {
+                log::error!("Failed to focus main webview: {}", e);
+            }
+        }) {
+            log::error!("Failed to schedule main window focus: {}", e);
         }
     } else {
         log::warn!("Could not find main window");

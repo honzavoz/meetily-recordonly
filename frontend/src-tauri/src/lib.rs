@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex as StdMutex;
 // Removed unused import
 
@@ -63,6 +63,173 @@ use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+static MAIN_WINDOW_HIDE_REQUEST: AtomicU64 = AtomicU64::new(0);
+static NEXT_MAIN_WINDOW_HIDE_REQUEST: AtomicU64 = AtomicU64::new(1);
+
+const FULLSCREEN_EXIT_CHECK_INTERVAL_MS: u64 = 25;
+const FULLSCREEN_EXIT_MAX_CHECKS: usize = 200;
+
+pub(crate) fn cancel_pending_main_window_hide() {
+    MAIN_WINDOW_HIDE_REQUEST.store(0, Ordering::SeqCst);
+}
+
+fn begin_main_window_hide() -> Option<u64> {
+    let request_id = NEXT_MAIN_WINDOW_HIDE_REQUEST.fetch_add(1, Ordering::SeqCst);
+    MAIN_WINDOW_HIDE_REQUEST
+        .compare_exchange(0, request_id, Ordering::SeqCst, Ordering::SeqCst)
+        .ok()
+        .map(|_| request_id)
+}
+
+fn is_current_main_window_hide(request_id: u64) -> bool {
+    MAIN_WINDOW_HIDE_REQUEST.load(Ordering::SeqCst) == request_id
+}
+
+fn finish_main_window_hide(request_id: u64) -> bool {
+    MAIN_WINDOW_HIDE_REQUEST
+        .compare_exchange(request_id, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+#[cfg(target_os = "macos")]
+async fn is_native_main_window_fullscreen<R: Runtime>(
+    window: &tauri::Window<R>,
+) -> Result<bool, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let window_for_check = window.clone();
+
+    window
+        .run_on_main_thread(move || {
+            use objc::{msg_send, runtime::Object, sel, sel_impl};
+
+            let result = window_for_check
+                .ns_window()
+                .map_err(|e| e.to_string())
+                .and_then(|ns_window| {
+                    if ns_window.is_null() {
+                        return Err("Native NSWindow handle is null".to_string());
+                    }
+
+                    let style_mask: usize =
+                        unsafe { msg_send![ns_window as *mut Object, styleMask] };
+                    const NS_WINDOW_STYLE_MASK_FULLSCREEN: usize = 1 << 14;
+
+                    Ok(style_mask & NS_WINDOW_STYLE_MASK_FULLSCREEN != 0)
+                });
+
+            let _ = sender.send(result);
+        })
+        .map_err(|e| e.to_string())?;
+
+    receiver
+        .await
+        .map_err(|_| "Native fullscreen state check was cancelled".to_string())?
+}
+
+#[cfg(not(target_os = "macos"))]
+async fn is_native_main_window_fullscreen<R: Runtime>(
+    window: &tauri::Window<R>,
+) -> Result<bool, String> {
+    window.is_fullscreen().map_err(|e| e.to_string())
+}
+
+fn hide_main_window_for_request<R: Runtime>(window: &tauri::Window<R>, request_id: u64) {
+    let window_for_hide = window.clone();
+    let dispatch_result = window.run_on_main_thread(move || {
+        if !is_current_main_window_hide(request_id) {
+            return;
+        }
+
+        if let Err(e) = window_for_hide.hide() {
+            log::error!("Failed to hide main window on close request: {}", e);
+        } else {
+            log::info!("Main window hidden to tray on close request");
+        }
+
+        finish_main_window_hide(request_id);
+    });
+
+    if let Err(e) = dispatch_result {
+        finish_main_window_hide(request_id);
+        log::error!("Failed to schedule main window hide: {}", e);
+    }
+}
+
+async fn wait_for_fullscreen_exit_then_hide<R: Runtime>(
+    window: tauri::Window<R>,
+    request_id: u64,
+    mut observed_native_fullscreen: bool,
+) {
+    for _ in 0..FULLSCREEN_EXIT_MAX_CHECKS {
+        if !is_current_main_window_hide(request_id) {
+            return;
+        }
+
+        match is_native_main_window_fullscreen(&window).await {
+            Ok(false) if observed_native_fullscreen => {
+                hide_main_window_for_request(&window, request_id);
+                return;
+            }
+            Ok(false) => {}
+            Ok(true) => {
+                observed_native_fullscreen = true;
+            }
+            Err(e) => {
+                finish_main_window_hide(request_id);
+                log::error!("Failed to check fullscreen state before hiding: {}", e);
+                return;
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(
+            FULLSCREEN_EXIT_CHECK_INTERVAL_MS,
+        ))
+        .await;
+    }
+
+    if finish_main_window_hide(request_id) {
+        log::error!("Timed out waiting to exit fullscreen; main window remains visible");
+    }
+}
+
+async fn handle_main_window_close<R: Runtime>(window: tauri::Window<R>, request_id: u64) {
+    let cached_fullscreen = match window.is_fullscreen() {
+        Ok(value) => value,
+        Err(e) => {
+            finish_main_window_hide(request_id);
+            log::error!("Failed to read cached fullscreen state: {}", e);
+            return;
+        }
+    };
+
+    let native_fullscreen = match is_native_main_window_fullscreen(&window).await {
+        Ok(value) => value,
+        Err(e) => {
+            finish_main_window_hide(request_id);
+            log::error!("Failed to check native fullscreen state: {}", e);
+            return;
+        }
+    };
+
+    if !is_current_main_window_hide(request_id) {
+        return;
+    }
+
+    if native_fullscreen || cached_fullscreen {
+        if let Err(e) = window.set_fullscreen(false) {
+            finish_main_window_hide(request_id);
+            log::error!(
+                "Failed to exit fullscreen before hiding main window: {}",
+                e
+            );
+            return;
+        }
+
+        wait_for_fullscreen_exit_then_hide(window, request_id, native_fullscreen).await;
+    } else {
+        hide_main_window_for_request(&window, request_id);
+    }
+}
 
 // Global language preference storage (default to "auto-translate" for automatic translation to English)
 static LANGUAGE_PREFERENCE: std::sync::LazyLock<StdMutex<String>> =
@@ -515,10 +682,12 @@ pub fn run() {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 if window.label() == "main" {
                     api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        log::error!("Failed to hide main window on close request: {}", e);
-                    } else {
-                        log::info!("Main window hidden to tray on close request");
+
+                    if let Some(request_id) = begin_main_window_hide() {
+                        tauri::async_runtime::spawn(handle_main_window_close(
+                            window.clone(),
+                            request_id,
+                        ));
                     }
                 }
             }
