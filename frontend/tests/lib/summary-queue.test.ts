@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
+  applySummaryCancellationStatus,
   isActiveSummaryJob,
   toSummaryJob,
   upsertSummaryJob,
@@ -33,6 +34,7 @@ describe("summary generation queue backend contracts", () => {
     expect(commands).toContain("already_active");
     expect(commands).toContain("queue_position");
     expect(commands).toMatch(/wait_for_turn\(&job_id(?:_clone)?, &token\)/);
+    expect(commands).toContain("RunningSummaryJobGuard");
   });
 
   test("owns cancellation tokens in the queue and targets exact job IDs", () => {
@@ -69,6 +71,7 @@ describe("summary generation queue backend contracts", () => {
     expect(hook).toContain("generationRequestInFlightRef");
     expect(hook).toContain("trackSummaryJob(result)");
     expect(hook).toContain("cancelSummaryJob(meeting.id, activeJob.jobId)");
+    expect(hook).not.toContain("startSummaryPolling");
     expect(hook).not.toContain("stopSummaryPolling(meeting.id)");
     expect(page).not.toContain("stopSummaryPolling");
     expect(sidebar).toContain("Queued #");
@@ -143,5 +146,19 @@ describe("summary generation queue frontend state", () => {
         error: "provider unavailable",
       }),
     ).toMatchObject({ phase: "failed", error: "provider unavailable" });
+  });
+
+  test("a stale cancellation response does not invent a cancelling state", () => {
+    const active: SummaryJob = {
+      meetingId: "a",
+      jobId: "job-a",
+      phase: "generating",
+      queuePosition: null,
+      error: null,
+    };
+
+    expect(applySummaryCancellationStatus(active, "not_active")).toEqual(active);
+    expect(applySummaryCancellationStatus(active, "cancelling").phase).toBe("cancelling");
+    expect(applySummaryCancellationStatus(active, "cancelled").phase).toBe("cancelled");
   });
 });

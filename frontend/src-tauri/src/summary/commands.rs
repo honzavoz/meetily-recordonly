@@ -14,6 +14,7 @@ use crate::summary::queue::{
 use crate::summary::service::SummaryService;
 use log::{error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
+use sqlx::SqlitePool;
 use std::path::PathBuf;
 use tauri::{AppHandle, Runtime};
 
@@ -88,6 +89,49 @@ impl MeetingSummaryLanguagePreference {
 enum MeetingFolderResolution {
     Folder(PathBuf),
     NoFolder,
+}
+
+struct RunningSummaryJobGuard {
+    pool: SqlitePool,
+    meeting_id: String,
+    job_id: String,
+    armed: bool,
+}
+
+impl RunningSummaryJobGuard {
+    fn new(pool: SqlitePool, meeting_id: String, job_id: String) -> Self {
+        Self {
+            pool,
+            meeting_id,
+            job_id,
+            armed: true,
+        }
+    }
+
+    async fn finish(mut self) {
+        SUMMARY_QUEUE.finish(&self.meeting_id, &self.job_id).await;
+        self.armed = false;
+    }
+}
+
+impl Drop for RunningSummaryJobGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let pool = self.pool.clone();
+        let meeting_id = self.meeting_id.clone();
+        let job_id = self.job_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = SummaryProcessesRepository::update_process_failed(
+                &pool,
+                &meeting_id,
+                "Summary worker stopped unexpectedly",
+            )
+            .await;
+            SUMMARY_QUEUE.finish(&meeting_id, &job_id).await;
+        });
+    }
 }
 
 /// Saves a meeting summary (Native SQLx implementation)
@@ -419,7 +463,7 @@ pub async fn api_process_transcript<R: Runtime>(
     // Create or reset the process entry in the database
     if let Err(e) = SummaryProcessesRepository::create_or_reset_process(&pool, &m_id, &job_id).await
     {
-        SUMMARY_QUEUE.release_reservation(&m_id, &job_id).await;
+        SUMMARY_QUEUE.finish(&m_id, &job_id).await;
         return Err(format!("Failed to initialize process: {}", e));
     }
 
@@ -450,7 +494,7 @@ pub async fn api_process_transcript<R: Runtime>(
                 db_error
             );
         }
-        SUMMARY_QUEUE.release_reservation(&m_id, &job_id).await;
+        SUMMARY_QUEUE.finish(&m_id, &job_id).await;
         return Err(message);
     }
 
@@ -459,9 +503,30 @@ pub async fn api_process_transcript<R: Runtime>(
     let committed = match SUMMARY_QUEUE.commit(&job_id).await {
         Ok(view) => view,
         Err(e) => {
+            if token.is_cancelled() {
+                let cancellation_result =
+                    SummaryProcessesRepository::update_process_cancelled_for_job(
+                        &pool, &m_id, &job_id,
+                    )
+                    .await;
+                SUMMARY_QUEUE.finish(&m_id, &job_id).await;
+                if !cancellation_result.map_err(|db_error| {
+                    format!("Failed to persist reserved job cancellation: {}", db_error)
+                })? {
+                    return Err("Reserved summary job no longer owns its database row".to_string());
+                }
+                return Ok(ProcessTranscriptResponse {
+                    message: "Summary generation was cancelled before enqueue".to_string(),
+                    process_id: job_id,
+                    meeting_id: m_id,
+                    status: "cancelled".to_string(),
+                    queue_position: None,
+                    already_active: false,
+                });
+            }
             let message = format!("Failed to enqueue summary generation: {}", e);
             let _ = SummaryProcessesRepository::update_process_failed(&pool, &m_id, &message).await;
-            SUMMARY_QUEUE.release_reservation(&m_id, &job_id).await;
+            SUMMARY_QUEUE.finish(&m_id, &job_id).await;
             return Err(message);
         }
     };
@@ -478,6 +543,11 @@ pub async fn api_process_transcript<R: Runtime>(
             );
             return;
         }
+        let running_guard = RunningSummaryJobGuard::new(
+            pool.clone(),
+            meeting_id_clone.clone(),
+            job_id_clone.clone(),
+        );
 
         match SummaryProcessesRepository::mark_process_running(
             &pool,
@@ -498,7 +568,7 @@ pub async fn api_process_transcript<R: Runtime>(
                     &message,
                 )
                 .await;
-                SUMMARY_QUEUE.finish(&meeting_id_clone, &job_id_clone).await;
+                running_guard.finish().await;
                 return;
             }
             Err(e) => {
@@ -509,7 +579,7 @@ pub async fn api_process_transcript<R: Runtime>(
                     &message,
                 )
                 .await;
-                SUMMARY_QUEUE.finish(&meeting_id_clone, &job_id_clone).await;
+                running_guard.finish().await;
                 return;
             }
         }
@@ -543,7 +613,7 @@ pub async fn api_process_transcript<R: Runtime>(
             .await;
         }
 
-        SUMMARY_QUEUE.finish(&meeting_id_clone, &job_id_clone).await;
+        running_guard.finish().await;
     });
 
     log_info!("🚀 Background task spawned for meeting_id: {}", &m_id);
@@ -582,12 +652,29 @@ pub async fn api_cancel_summary<R: Runtime>(
 
     match SUMMARY_QUEUE.cancel(&meeting_id, &job_id).await {
         CancelOutcome::Queued(_) => {
-            SummaryProcessesRepository::update_process_cancelled(
+            match SummaryProcessesRepository::update_process_cancelled_for_job(
                 state.db_manager.pool(),
                 &meeting_id,
+                &job_id,
             )
             .await
-            .map_err(|e| format!("Failed to update cancellation status: {}", e))?;
+            {
+                Ok(true) => {}
+                Ok(false) => {
+                    return Ok(serde_json::json!({
+                        "message": "Summary job no longer owns the persisted process",
+                        "meeting_id": meeting_id,
+                        "process_id": job_id,
+                        "status": "not_active",
+                    }));
+                }
+                Err(cancel_error) => {
+                    return Err(format!(
+                        "Failed to persist queued cancellation: {}",
+                        cancel_error
+                    ));
+                }
+            }
             Ok(serde_json::json!({
                 "message": "Queued summary generation cancelled",
                 "meeting_id": meeting_id,

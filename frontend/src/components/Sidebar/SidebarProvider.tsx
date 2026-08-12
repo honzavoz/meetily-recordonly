@@ -11,6 +11,7 @@ import type { MeetingProjectView, Project } from '@/types/projects';
 import { filterMeetingsForProjectView } from '@/lib/meeting-projects';
 import type { ProjectColorKey } from '@/lib/project-colors';
 import {
+  applySummaryCancellationStatus,
   isActiveSummaryJob,
   toSummaryJob,
   upsertSummaryJob,
@@ -67,12 +68,7 @@ interface SidebarContextType {
   summaryJobs: Record<string, SummaryJob>;
   trackSummaryJob: (response: SummaryBackendStatus) => void;
   refreshSummaryJob: (meetingId: string) => Promise<SummaryBackendStatus>;
-  cancelSummaryJob: (meetingId: string, jobId: string) => Promise<void>;
-  startSummaryPolling: (
-    meetingId: string,
-    processId: string,
-    onUpdate: (result: any) => void,
-  ) => void;
+  cancelSummaryJob: (meetingId: string, jobId: string) => Promise<string>;
   // Refetch meetings from backend
   refetchMeetings: () => Promise<void>;
   projects: Project[];
@@ -114,9 +110,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const summaryPollersRef = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const summaryPollsInFlightRef = React.useRef(new Set<string>());
   const summaryPollFailuresRef = React.useRef(new Map<string, number>());
-  const summaryPollCallbacksRef = React.useRef(
-    new Map<string, (result: any) => void>(),
-  );
   const pollSummaryJobRef = React.useRef<(meetingId: string) => Promise<void>>(async () => {});
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectView, setActiveProjectView] = useState<MeetingProjectView>({ type: 'all' });
@@ -289,8 +282,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     const response = await invoke<SummaryBackendStatus>('api_get_summary', { meetingId });
     const job = toSummaryJob(response);
     setSummaryJobs((current) => upsertSummaryJob(current, job));
-    summaryPollCallbacksRef.current.get(meetingId)?.(response);
-    if (!isActiveSummaryJob(job)) summaryPollCallbacksRef.current.delete(meetingId);
     return response;
   }, []);
 
@@ -328,19 +319,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     if (isActiveSummaryJob(job)) ensureSummaryPolling(job.meetingId);
   }, [ensureSummaryPolling]);
 
-  const startSummaryPolling = React.useCallback((
-    meetingId: string,
-    processId: string,
-    onUpdate: (result: any) => void,
-  ) => {
-    summaryPollCallbacksRef.current.set(meetingId, onUpdate);
-    trackSummaryJob({
-      meeting_id: meetingId,
-      process_id: processId,
-      status: 'pending',
-    });
-  }, [trackSummaryJob]);
-
   const cancelSummaryJob = React.useCallback(async (meetingId: string, jobId: string) => {
     const result = await invoke<{ status: string }>('api_cancel_summary', {
       meetingId,
@@ -349,16 +327,17 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     setSummaryJobs((current) => {
       const active = current[meetingId];
       if (!active || active.jobId !== jobId) return current;
-      return upsertSummaryJob(current, {
-        ...active,
-        phase: result.status === 'cancelled' ? 'cancelled' : 'cancelling',
-        queuePosition: null,
-        error: null,
-      });
+      return upsertSummaryJob(current, applySummaryCancellationStatus(active, result.status));
     });
-    if (result.status === 'cancelling') ensureSummaryPolling(meetingId);
-    else stopSummaryPolling(meetingId);
-  }, [ensureSummaryPolling, stopSummaryPolling]);
+    if (result.status === 'cancelling') {
+      ensureSummaryPolling(meetingId);
+    } else if (result.status === 'cancelled') {
+      stopSummaryPolling(meetingId);
+    } else {
+      await refreshSummaryJob(meetingId);
+    }
+    return result.status;
+  }, [ensureSummaryPolling, refreshSummaryJob, stopSummaryPolling]);
 
   const assignProject = React.useCallback(async (meetingId: string, project: Project) => {
     const previousMeetings = meetings;
@@ -532,7 +511,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       summaryPollersRef.current.forEach((timer) => clearTimeout(timer));
       summaryPollersRef.current.clear();
       summaryPollsInFlightRef.current.clear();
-      summaryPollCallbacksRef.current.clear();
     };
   }, []);
 
@@ -561,7 +539,6 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       trackSummaryJob,
       refreshSummaryJob,
       cancelSummaryJob,
-      startSummaryPolling,
       refetchMeetings: fetchMeetings,
       projects,
       activeProjectView,

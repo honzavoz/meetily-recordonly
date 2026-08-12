@@ -80,3 +80,16 @@ export function isActiveSummaryJob(job?: SummaryJob): boolean {
     || job.phase === 'cancelling'
   );
 }
+
+export function applySummaryCancellationStatus(
+  job: SummaryJob,
+  status: string,
+): SummaryJob {
+  if (status === 'cancelled') {
+    return { ...job, phase: 'cancelled', queuePosition: null, error: null };
+  }
+  if (status === 'cancelling') {
+    return { ...job, phase: 'cancelling', queuePosition: null, error: null };
+  }
+  return job;
+}

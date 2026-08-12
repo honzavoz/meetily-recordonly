@@ -348,6 +348,38 @@ impl SummaryProcessesRepository {
         );
         Ok(())
     }
+
+    pub async fn update_process_cancelled_for_job(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        job_id: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r#"
+            UPDATE summary_processes
+            SET
+                status = 'cancelled',
+                updated_at = ?,
+                end_time = ?,
+                error = 'Generation was cancelled by user',
+                result = COALESCE(result_backup, result),
+                result_backup = NULL,
+                result_backup_timestamp = NULL
+            WHERE meeting_id = ?
+              AND json_extract(metadata, '$.job_id') = ?
+              AND upper(status) = 'PENDING'
+            "#,
+        )
+        .bind(now)
+        .bind(now)
+        .bind(meeting_id)
+        .bind(job_id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
 }
 
 #[cfg(test)]
@@ -502,6 +534,37 @@ mod tests {
         assert_eq!(recovered, 2);
         assert_recovered(&pool, "queued", r#"{"markdown":"old"}"#).await;
         assert_recovered(&pool, "running", r#"{"markdown":"older"}"#).await;
+    }
+
+    #[tokio::test]
+    async fn stale_queued_cancellation_cannot_touch_a_newer_job() {
+        let pool = test_pool().await;
+        insert_meeting(&pool, "meeting-race").await;
+        SummaryProcessesRepository::create_or_reset_process(&pool, "meeting-race", "new-job")
+            .await
+            .unwrap();
+
+        assert!(
+            !SummaryProcessesRepository::update_process_cancelled_for_job(
+                &pool,
+                "meeting-race",
+                "old-job"
+            )
+            .await
+            .unwrap()
+        );
+
+        let row: (String, String) =
+            sqlx::query_as("SELECT status, metadata FROM summary_processes WHERE meeting_id = ?")
+                .bind("meeting-race")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, "PENDING");
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.1).unwrap()["job_id"],
+            "new-job"
+        );
     }
 
     #[tokio::test]

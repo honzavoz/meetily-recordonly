@@ -227,7 +227,21 @@ impl SummaryQueueManager {
         };
 
         match phase {
-            SummaryJobPhase::Reserved | SummaryJobPhase::Queued => {
+            SummaryJobPhase::Reserved => {
+                let entry = state
+                    .jobs
+                    .get_mut(job_id)
+                    .expect("owned reserved job must exist");
+                entry.token.cancel();
+                entry.phase = SummaryJobPhase::Cancelling;
+                let view = state
+                    .view(job_id)
+                    .expect("owned reserved job must be visible");
+                drop(state);
+                self.changed.notify_waiters();
+                CancelOutcome::Running(view)
+            }
+            SummaryJobPhase::Queued => {
                 let mut view = state
                     .view(job_id)
                     .expect("owned queued job must be visible");
@@ -426,6 +440,25 @@ mod tests {
         else {
             panic!("expected running cancellation")
         };
+        assert_eq!(cancelling.phase, SummaryJobPhase::Cancelling);
+        assert!(token.is_cancelled());
+        assert_eq!(queue.active_count().await, 1);
+        assert!(queue.finish("meeting-a", &view.job_id).await);
+        assert_eq!(queue.active_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn reserved_cancellation_stays_owned_until_enqueue_finishes() {
+        let queue = SummaryQueueManager::new();
+        let ReservationOutcome::New { view, token } = queue.reserve("meeting-a").await else {
+            panic!("expected new job")
+        };
+
+        let CancelOutcome::Running(cancelling) = queue.cancel("meeting-a", &view.job_id).await
+        else {
+            panic!("reserved cancellation must wait for command cleanup")
+        };
+
         assert_eq!(cancelling.phase, SummaryJobPhase::Cancelling);
         assert!(token.is_cancelled());
         assert_eq!(queue.active_count().await, 1);
