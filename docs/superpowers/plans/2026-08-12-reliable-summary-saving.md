@@ -183,3 +183,47 @@ Confirm the diff contains no unrelated changes, no swallowed save errors, no cle
 git add frontend/src/lib/summary-saving.ts frontend/tests/lib/summary-saving.test.ts frontend/src/components/AISummary/BlockNoteSummaryView.tsx frontend/src/hooks/meeting-details/useMeetingData.ts frontend/src-tauri/src/database/repositories/summary.rs
 git commit -m "fix: make summary saving reliable"
 ```
+
+### Task 5: Publish version 0.4.8
+
+**Files:**
+- Modify: `frontend/tests/lib/app-version.test.mjs`
+- Modify: `frontend/package.json`
+- Modify: `frontend/src-tauri/tauri.conf.json`
+- Modify: `frontend/src-tauri/Cargo.toml`
+- Modify: `Cargo.lock`
+
+- [ ] **Step 1: Change the version test to 0.4.8 and verify RED**
+
+Update only the expected application version in `app-version.test.mjs`, then run `cd frontend && node --test tests/lib/app-version.test.mjs`.
+
+Expected: FAIL because the package declarations still report `0.4.7`.
+
+- [ ] **Step 2: Bump all package declarations**
+
+Set the Meetily application version to `0.4.8` in the four version declarations and the `meetily` package entry in `Cargo.lock`. Do not change dependency versions.
+
+- [ ] **Step 3: Verify release inputs**
+
+Run:
+
+```bash
+cd frontend && node --test tests/lib/app-version.test.mjs
+./scripts/check-version-consistency.sh
+./scripts/tests/release-preflight.test.sh
+git diff --check
+```
+
+Expected: all commands pass.
+
+- [ ] **Step 4: Commit and push main**
+
+Commit the version files as `chore: release 0.4.8`, then run `git push origin main`. Confirm that `origin/main` resolves to the local release commit.
+
+- [ ] **Step 5: Dispatch and monitor the protected release workflow**
+
+Run `gh workflow run release.yml --ref main`. Monitor the resulting run through completion. Do not create or publish a release manually if the protected workflow fails.
+
+- [ ] **Step 6: Verify the published updater release**
+
+Confirm that GitHub marks `v0.4.8` as the latest non-draft release. Download its `latest.json` and use `scripts/verify-updater-release-assets.js` or the equivalent workflow evidence to confirm version `0.4.8`, the canonical `darwin-aarch64` archive URL, updater signature, archive, and DMG assets.
