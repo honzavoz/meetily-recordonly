@@ -198,4 +198,30 @@ describe("runPreparedUpdateAttempt", () => {
     expect(closes).toBe(1);
     expect(checks).toBe(1);
   });
+
+  test("does not report installation success when relaunch fails", async () => {
+    const prepared = preparedUpdate();
+    let successCallbacks = 0;
+    let discards = 0;
+
+    await expect(
+      runPreparedUpdateAttempt({
+        info: { available: true, preparedUpdate: prepared },
+        retryState: new PreparedUpdateRetryState(),
+        check: async () => ({ available: false }),
+        runOperation: async (_update, operation) => {
+          await operation();
+          return true;
+        },
+        discard: async () => { discards += 1; },
+        onPrepared: () => undefined,
+        onEvent: () => undefined,
+        onInstalled: () => { successCallbacks += 1; },
+        relaunch: async () => { throw new Error("restart denied"); },
+      }),
+    ).rejects.toMatchObject({ stage: "install", cause: new Error("restart denied") });
+
+    expect(successCallbacks).toBe(0);
+    expect(discards).toBe(1);
+  });
 });

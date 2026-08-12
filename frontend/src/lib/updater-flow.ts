@@ -130,8 +130,8 @@ export async function runPreparedUpdateAttempt(
     const started = await options.runOperation(preparedUpdate, async () => {
       operationEntered = true;
       await preparedUpdate.downloadAndInstall(options.onEvent);
-      await options.onInstalled?.();
       await options.relaunch();
+      await options.onInstalled?.();
     });
 
     if (!started) {
