@@ -5,9 +5,19 @@
  * Provides update checking, downloading, and installation functionality.
  */
 
-import { check, Update } from '@tauri-apps/plugin-updater';
-import { relaunch } from '@tauri-apps/plugin-process';
+import { check } from '@tauri-apps/plugin-updater';
 import { getVersion } from '@tauri-apps/api/app';
+import type { PreparedUpdate } from '@/lib/updater-flow';
+
+interface CheckedUpdate extends PreparedUpdate {
+  available: boolean;
+  version: string;
+  date?: string;
+  body?: string;
+}
+
+type CheckUpdate = () => Promise<CheckedUpdate | null>;
+type ReadVersion = () => Promise<string>;
 
 export interface UpdateInfo {
   available: boolean;
@@ -16,6 +26,7 @@ export interface UpdateInfo {
   date?: string;
   body?: string;
   downloadUrl?: string;
+  preparedUpdate?: PreparedUpdate;
 }
 
 export interface UpdateProgress {
@@ -32,6 +43,11 @@ export class UpdateService {
   private updateCheckInProgress = false;
   private lastCheckTime: number | null = null;
   private readonly CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  constructor(
+    private readonly checkUpdate: CheckUpdate = check,
+    private readonly readVersion: ReadVersion = getVersion,
+  ) {}
 
   /**
    * Check for available updates
@@ -51,7 +67,7 @@ export class UpdateService {
         console.log('Skipping update check - checked recently');
         return {
           available: false,
-          currentVersion: await getVersion(),
+          currentVersion: await this.readVersion(),
         };
       }
     }
@@ -60,8 +76,8 @@ export class UpdateService {
     this.lastCheckTime = Date.now();
 
     try {
-      const currentVersion = await getVersion();
-      const update = await check();
+      const currentVersion = await this.readVersion();
+      const update = await this.checkUpdate();
 
       if (update?.available) {
         return {
@@ -70,6 +86,7 @@ export class UpdateService {
           version: update.version,
           date: update.date,
           body: update.body,
+          preparedUpdate: update,
         };
       }
 
@@ -82,34 +99,6 @@ export class UpdateService {
       throw error;
     } finally {
       this.updateCheckInProgress = false;
-    }
-  }
-
-  /**
-   * Download and install the available update
-   * @param update The update object from checkForUpdates
-   * @param onProgress Optional progress callback
-   * @returns Promise that resolves when download completes
-   */
-  async downloadAndInstall(
-    update: Update,
-    onProgress?: (progress: UpdateProgress) => void
-  ): Promise<void> {
-    try {
-      // Download the update
-      await update.download();
-
-      // Notify progress if callback provided
-      if (onProgress) {
-        onProgress({ downloaded: 100, total: 100, percentage: 100 });
-      }
-
-      // Install and relaunch
-      await update.install();
-      await relaunch();
-    } catch (error) {
-      console.error('Failed to download/install update:', error);
-      throw error;
     }
   }
 
