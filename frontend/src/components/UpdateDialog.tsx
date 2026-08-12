@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Download, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Download, AlertCircle, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -10,9 +10,14 @@ import {
 } from './ui/dialog';
 import { Button } from './ui/button';
 import { updateService, UpdateInfo, UpdateProgress } from '@/services/updateService';
-import { check, Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
 import { toast } from 'sonner';
+import {
+  normalizeUpdaterError,
+  resolvePreparedUpdate,
+  UpdateOperationGate,
+  type PreparedUpdate,
+} from '@/lib/updater-flow';
 
 interface UpdateDialogProps {
   open: boolean;
@@ -22,31 +27,22 @@ interface UpdateDialogProps {
 
 export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogProps) {
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [update, setUpdate] = useState<Update | null>(null);
+  const [update, setUpdate] = useState<PreparedUpdate | null>(null);
+  const operationGateRef = useRef(new UpdateOperationGate());
 
   useEffect(() => {
     if (open && updateInfo?.available) {
-      // Reset state when dialog opens
       setIsDownloading(false);
+      setIsPreparing(false);
       setProgress(null);
       setError(null);
-
-      // Get the update object when dialog opens
-      check().then((updateResult) => {
-        if (updateResult?.available) {
-          setUpdate(updateResult);
-        } else {
-          setError('Update no longer available');
-        }
-      }).catch((err) => {
-        console.error('Failed to get update object:', err);
-        setError('Failed to prepare update: ' + (err.message || 'Unknown error'));
-      });
+      setUpdate(updateInfo.preparedUpdate ?? null);
     } else {
-      // Reset state when dialog closes
       setIsDownloading(false);
+      setIsPreparing(false);
       setProgress(null);
       setError(null);
       setUpdate(null);
@@ -54,43 +50,32 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
   }, [open, updateInfo]);
 
   const handleDownloadAndInstall = async () => {
-    // Get update object if not already available
-    let updateToUse: Update | null = update;
-    if (!updateToUse) {
+    await operationGateRef.current.run(async () => {
+      let stage: 'prepare' | 'install' = 'prepare';
+      setError(null);
+      setIsPreparing(!update);
+
       try {
-        const updateResult = await check();
-        if (updateResult?.available) {
-          updateToUse = updateResult;
-          setUpdate(updateResult);
-        } else {
-          setError('Update not available');
-          return;
-        }
-      } catch (err: any) {
-        setError('Failed to get update: ' + (err.message || 'Unknown error'));
-        return;
-      }
-    }
+        const updateToUse = await resolvePreparedUpdate(
+          {
+            available: Boolean(updateInfo?.available),
+            preparedUpdate: update ?? updateInfo?.preparedUpdate,
+          },
+          () => updateService.checkForUpdates(true),
+        );
+        setUpdate(updateToUse);
+        setIsPreparing(false);
+        setIsDownloading(true);
+        setProgress({ downloaded: 0, total: 0, percentage: 0 });
+        stage = 'install';
 
-    // At this point, updateToUse is guaranteed to be non-null
-    if (!updateToUse) {
-      return; // This should never happen, but TypeScript needs this check
-    }
-
-    setIsDownloading(true);
-    setError(null);
-    setProgress({ downloaded: 0, total: 0, percentage: 0 });
-
-    try {
       let downloaded = 0;
       let contentLength = 0;
 
-      // Use the official Tauri updater API with progress callbacks
       await updateToUse.downloadAndInstall((event) => {
         switch (event.event) {
           case 'Started':
-            contentLength = event.data.contentLength || 0;
-            console.log(`[UpdateDialog] Started downloading ${contentLength} bytes`);
+            contentLength = event.data.contentLength ?? 0;
             setProgress({
               downloaded: 0,
               total: contentLength,
@@ -99,11 +84,10 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             break;
 
           case 'Progress':
-            downloaded += event.data.chunkLength || 0;
+            downloaded += event.data.chunkLength;
             const percentage = contentLength > 0
               ? Math.round((downloaded / contentLength) * 100)
               : 0;
-            console.log(`[UpdateDialog] Progress: ${downloaded} / ${contentLength} bytes (${percentage}%)`);
             setProgress({
               downloaded,
               total: contentLength,
@@ -112,7 +96,6 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             break;
 
           case 'Finished':
-            console.log('[UpdateDialog] Download finished');
             setProgress({
               downloaded: contentLength,
               total: contentLength,
@@ -122,23 +105,22 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
         }
       });
 
-      console.log('[UpdateDialog] Update installed successfully');
       toast.success('Update installed successfully. The app will restart...');
-
-      // Mark download as complete before closing
       setIsDownloading(false);
-
-      // Close dialog before relaunch
-      handleOpenChange(false);
-
-      // Relaunch the app
+      onOpenChange(false);
       await relaunch();
-    } catch (err: any) {
-      console.error('Update failed:', err);
-      setError(err.message || 'Failed to download or install update');
-      setIsDownloading(false);
-      toast.error('Update failed: ' + (err.message || 'Unknown error'));
-    }
+      } catch (cause: unknown) {
+        console.error(`[UpdateDialog] ${stage} failed`, cause);
+        const fallback = stage === 'prepare'
+          ? 'Unable to prepare the update'
+          : 'Unable to download or install the update';
+        const message = normalizeUpdaterError(cause, fallback);
+        setError(`${stage === 'prepare' ? 'Failed to prepare update' : 'Update failed'}: ${message}`);
+        setIsPreparing(false);
+        setIsDownloading(false);
+        toast.error(message);
+      }
+    });
   };
 
   const formatDate = (dateString?: string) => {
@@ -150,26 +132,23 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
     }
   };
 
-  // Prevent closing the dialog when downloading
+  const isBusy = isPreparing || isDownloading;
+
   const handleOpenChange = (newOpen: boolean) => {
-    // If trying to close while downloading, prevent it
-    if (!newOpen && isDownloading) {
+    if (!newOpen && isBusy) {
       return;
     }
-    // Otherwise, allow normal close behavior
     onOpenChange(newOpen);
   };
 
-  // Prevent ESC key from closing dialog during download
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
-    if (isDownloading) {
+    if (isBusy) {
       event.preventDefault();
     }
   };
 
-  // Prevent outside clicks from closing dialog during download
   const handleInteractOutside = (event: Event) => {
-    if (isDownloading) {
+    if (isBusy) {
       event.preventDefault();
     }
   };
@@ -187,10 +166,10 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {isDownloading ? (
+            {isBusy ? (
               <>
                 <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                Downloading Update
+                {isPreparing ? 'Preparing Update' : 'Downloading Update'}
               </>
             ) : error ? (
               <>
@@ -205,8 +184,10 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
             )}
           </DialogTitle>
           <DialogDescription>
-            {isDownloading
-              ? 'Downloading the latest version...'
+            {isBusy
+              ? isPreparing
+                ? 'Preparing the latest version...'
+                : 'Downloading the latest version...'
               : error
               ? 'An error occurred while updating'
               : `A new version (${updateInfo.version}) is available`}
@@ -214,7 +195,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {!isDownloading && !error && (
+          {!isBusy && !error && (
             <>
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
@@ -275,7 +256,7 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
         </div>
 
         <DialogFooter>
-          {!isDownloading && !error && (
+          {!isBusy && !error && (
             <>
               <Button variant="outline" onClick={() => handleOpenChange(false)}>
                 Later
@@ -286,10 +267,15 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               </Button>
             </>
           )}
-          {error && (
-            <Button variant="outline" onClick={() => handleOpenChange(false)}>
-              Close
-            </Button>
+          {error && !isBusy && (
+            <>
+              <Button variant="outline" onClick={() => handleOpenChange(false)}>
+                Close
+              </Button>
+              <Button onClick={handleDownloadAndInstall} disabled={isBusy}>
+                Try Again
+              </Button>
+            </>
           )}
         </DialogFooter>
       </DialogContent>
