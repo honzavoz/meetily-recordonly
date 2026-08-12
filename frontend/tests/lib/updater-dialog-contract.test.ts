@@ -6,6 +6,10 @@ const source = readFileSync(
   resolve(import.meta.dir, "../../src/components/UpdateDialog.tsx"),
   "utf8",
 );
+const aboutSource = readFileSync(
+  resolve(import.meta.dir, "../../src/components/About.tsx"),
+  "utf8",
+);
 
 describe("UpdateDialog updater ownership", () => {
   test("uses the prepared resource without importing the raw Tauri check", () => {
@@ -18,7 +22,12 @@ describe("UpdateDialog updater ownership", () => {
 
   test("normalizes errors and guards repeated update operations", () => {
     expect(source).toContain("normalizeUpdaterError");
-    expect(source).toContain("new UpdateOperationGate()");
+    expect(source).toContain("updateService.runUpdateOperation");
+    expect(source).toContain("updateService.discardPreparedUpdate");
+    expect(source).toContain("operationInFlightRef");
+    expect(source).toContain("new PreparedUpdateRetryState()");
+    expect(source).toContain("operationEntered");
     expect(source).toContain("Try Again");
+    expect(aboutSource).toContain("normalizeUpdaterError(error, 'Unknown error')");
   });
 });

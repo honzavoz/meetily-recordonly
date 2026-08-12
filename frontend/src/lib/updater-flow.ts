@@ -2,6 +2,7 @@ import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 
 export interface PreparedUpdate {
   downloadAndInstall(onEvent?: (event: DownloadEvent) => void): Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface PreparedUpdateInfo {
@@ -25,6 +26,10 @@ export async function resolvePreparedUpdate(
 export class UpdateOperationGate {
   private running = false;
 
+  get isRunning(): boolean {
+    return this.running;
+  }
+
   async run(operation: () => Promise<void>): Promise<boolean> {
     if (this.running) return false;
     this.running = true;
@@ -34,6 +39,30 @@ export class UpdateOperationGate {
     } finally {
       this.running = false;
     }
+  }
+}
+
+export class PreparedUpdateRetryState {
+  private forceRefresh = false;
+
+  select(
+    local: PreparedUpdate | null,
+    provided?: PreparedUpdate,
+  ): PreparedUpdate | undefined {
+    if (this.forceRefresh) return undefined;
+    return local ?? provided;
+  }
+
+  markFailed(): void {
+    this.forceRefresh = true;
+  }
+
+  markPrepared(_update: PreparedUpdate): void {
+    this.forceRefresh = false;
+  }
+
+  reset(): void {
+    this.forceRefresh = false;
   }
 }
 

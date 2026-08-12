@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   normalizeUpdaterError,
+  PreparedUpdateRetryState,
   resolvePreparedUpdate,
   UpdateOperationGate,
   type PreparedUpdate,
@@ -8,6 +9,7 @@ import {
 
 const preparedUpdate = (): PreparedUpdate => ({
   downloadAndInstall: async () => undefined,
+  close: async () => undefined,
 });
 
 describe("normalizeUpdaterError", () => {
@@ -80,6 +82,7 @@ describe("UpdateOperationGate", () => {
       calls += 1;
       await blocker;
     });
+    expect(gate.isRunning).toBe(true);
     const second = await gate.run(async () => {
       calls += 1;
     });
@@ -88,11 +91,26 @@ describe("UpdateOperationGate", () => {
     expect(calls).toBe(1);
     release();
     expect(await first).toBe(true);
+    expect(gate.isRunning).toBe(false);
     expect(
       await gate.run(async () => {
         calls += 1;
       }),
     ).toBe(true);
     expect(calls).toBe(2);
+  });
+});
+
+describe("PreparedUpdateRetryState", () => {
+  test("forces one fresh preparation after a failed resource", () => {
+    const retry = new PreparedUpdateRetryState();
+    const stale = preparedUpdate();
+    const replacement = preparedUpdate();
+
+    expect(retry.select(stale, stale)).toBe(stale);
+    retry.markFailed();
+    expect(retry.select(null, stale)).toBeUndefined();
+    retry.markPrepared(replacement);
+    expect(retry.select(replacement, stale)).toBe(replacement);
   });
 });

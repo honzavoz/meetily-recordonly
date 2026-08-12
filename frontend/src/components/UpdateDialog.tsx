@@ -14,8 +14,8 @@ import { relaunch } from '@tauri-apps/plugin-process';
 import { toast } from 'sonner';
 import {
   normalizeUpdaterError,
+  PreparedUpdateRetryState,
   resolvePreparedUpdate,
-  UpdateOperationGate,
   type PreparedUpdate,
 } from '@/lib/updater-flow';
 
@@ -31,10 +31,13 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
   const [progress, setProgress] = useState<UpdateProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [update, setUpdate] = useState<PreparedUpdate | null>(null);
-  const operationGateRef = useRef(new UpdateOperationGate());
+  const operationInFlightRef = useRef(false);
+  const retryStateRef = useRef(new PreparedUpdateRetryState());
 
   useEffect(() => {
+    if (operationInFlightRef.current) return;
     if (open && updateInfo?.available) {
+      retryStateRef.current.reset();
       setIsDownloading(false);
       setIsPreparing(false);
       setProgress(null);
@@ -50,77 +53,86 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
   }, [open, updateInfo]);
 
   const handleDownloadAndInstall = async () => {
-    await operationGateRef.current.run(async () => {
-      let stage: 'prepare' | 'install' = 'prepare';
-      setError(null);
-      setIsPreparing(!update);
+    if (operationInFlightRef.current) return;
+    operationInFlightRef.current = true;
+    let stage: 'prepare' | 'install' = 'prepare';
+    let updateToUse: PreparedUpdate | null = null;
+    let operationEntered = false;
+    setError(null);
+    setIsPreparing(!update);
 
-      try {
-        const updateToUse = await resolvePreparedUpdate(
-          {
-            available: Boolean(updateInfo?.available),
-            preparedUpdate: update ?? updateInfo?.preparedUpdate,
-          },
-          () => updateService.checkForUpdates(true),
-        );
-        setUpdate(updateToUse);
-        setIsPreparing(false);
-        setIsDownloading(true);
-        setProgress({ downloaded: 0, total: 0, percentage: 0 });
-        stage = 'install';
+    try {
+      const preparedUpdate = await resolvePreparedUpdate(
+        {
+          available: Boolean(updateInfo?.available),
+          preparedUpdate: retryStateRef.current.select(update, updateInfo?.preparedUpdate),
+        },
+        () => updateService.checkForUpdates(true),
+      );
+      updateToUse = preparedUpdate;
+      retryStateRef.current.markPrepared(preparedUpdate);
+      setUpdate(preparedUpdate);
+      setIsPreparing(false);
+      setIsDownloading(true);
+      setProgress({ downloaded: 0, total: 0, percentage: 0 });
+      stage = 'install';
 
       let downloaded = 0;
       let contentLength = 0;
 
-      await updateToUse.downloadAndInstall((event) => {
-        switch (event.event) {
-          case 'Started':
-            contentLength = event.data.contentLength ?? 0;
-            setProgress({
-              downloaded: 0,
-              total: contentLength,
-              percentage: 0,
-            });
-            break;
+      const started = await updateService.runUpdateOperation(preparedUpdate, async () => {
+        operationEntered = true;
+        await preparedUpdate.downloadAndInstall((event) => {
+          switch (event.event) {
+            case 'Started':
+              contentLength = event.data.contentLength ?? 0;
+              setProgress({ downloaded: 0, total: contentLength, percentage: 0 });
+              break;
+            case 'Progress': {
+              downloaded += event.data.chunkLength;
+              const percentage = contentLength > 0
+                ? Math.round((downloaded / contentLength) * 100)
+                : 0;
+              setProgress({ downloaded, total: contentLength, percentage });
+              break;
+            }
+            case 'Finished':
+              setProgress({
+                downloaded: contentLength,
+                total: contentLength,
+                percentage: 100,
+              });
+              break;
+          }
+        });
 
-          case 'Progress':
-            downloaded += event.data.chunkLength;
-            const percentage = contentLength > 0
-              ? Math.round((downloaded / contentLength) * 100)
-              : 0;
-            setProgress({
-              downloaded,
-              total: contentLength,
-              percentage,
-            });
-            break;
-
-          case 'Finished':
-            setProgress({
-              downloaded: contentLength,
-              total: contentLength,
-              percentage: 100,
-            });
-            break;
-        }
+        toast.success('Update installed successfully. The app will restart...');
+        setIsDownloading(false);
+        onOpenChange(false);
+        await relaunch();
       });
 
-      toast.success('Update installed successfully. The app will restart...');
-      setIsDownloading(false);
-      onOpenChange(false);
-      await relaunch();
-      } catch (cause: unknown) {
-        console.error(`[UpdateDialog] ${stage} failed`, cause);
-        const fallback = stage === 'prepare'
-          ? 'Unable to prepare the update'
-          : 'Unable to download or install the update';
-        const message = normalizeUpdaterError(cause, fallback);
-        setError(`${stage === 'prepare' ? 'Failed to prepare update' : 'Update failed'}: ${message}`);
-        setIsPreparing(false);
-        setIsDownloading(false);
-        toast.error(message);
+      if (!started) {
+        throw new Error('Another update installation is already in progress');
       }
-    });
+    } catch (cause: unknown) {
+      console.error(`[UpdateDialog] ${stage} failed`, cause);
+      if (updateToUse && operationEntered) {
+        await updateService.discardPreparedUpdate(updateToUse);
+      }
+      retryStateRef.current.markFailed();
+      setUpdate(null);
+      const fallback = stage === 'prepare'
+        ? 'Unable to prepare the update'
+        : 'Unable to download or install the update';
+      const message = normalizeUpdaterError(cause, fallback);
+      setError(`${stage === 'prepare' ? 'Failed to prepare update' : 'Update failed'}: ${message}`);
+      setIsPreparing(false);
+      setIsDownloading(false);
+      toast.error(message);
+    } finally {
+      operationInFlightRef.current = false;
+    }
   };
 
   const formatDate = (dateString?: string) => {
@@ -135,20 +147,20 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
   const isBusy = isPreparing || isDownloading;
 
   const handleOpenChange = (newOpen: boolean) => {
-    if (!newOpen && isBusy) {
+    if (!newOpen && (operationInFlightRef.current || isBusy)) {
       return;
     }
     onOpenChange(newOpen);
   };
 
   const handleEscapeKeyDown = (event: KeyboardEvent) => {
-    if (isBusy) {
+    if (operationInFlightRef.current || isBusy) {
       event.preventDefault();
     }
   };
 
   const handleInteractOutside = (event: Event) => {
-    if (isBusy) {
+    if (operationInFlightRef.current || isBusy) {
       event.preventDefault();
     }
   };

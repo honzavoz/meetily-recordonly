@@ -8,6 +8,7 @@
 import { check } from '@tauri-apps/plugin-updater';
 import { getVersion } from '@tauri-apps/api/app';
 import type { PreparedUpdate } from '@/lib/updater-flow';
+import { UpdateOperationGate } from '@/lib/updater-flow';
 
 interface CheckedUpdate extends PreparedUpdate {
   available: boolean;
@@ -43,6 +44,8 @@ export class UpdateService {
   private updateCheckInProgress = false;
   private lastCheckTime: number | null = null;
   private readonly CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  private preparedUpdate: PreparedUpdate | null = null;
+  private readonly updateOperationGate = new UpdateOperationGate();
 
   constructor(
     private readonly checkUpdate: CheckUpdate = check,
@@ -55,6 +58,9 @@ export class UpdateService {
    * @returns Promise with update information
    */
   async checkForUpdates(force = false): Promise<UpdateInfo> {
+    if (this.updateOperationGate.isRunning) {
+      throw new Error('Update installation already in progress');
+    }
     // Prevent concurrent update checks
     if (this.updateCheckInProgress) {
       throw new Error('Update check already in progress');
@@ -80,6 +86,7 @@ export class UpdateService {
       const update = await this.checkUpdate();
 
       if (update?.available) {
+        await this.replacePreparedUpdate(update);
         return {
           available: true,
           currentVersion,
@@ -89,6 +96,8 @@ export class UpdateService {
           preparedUpdate: update,
         };
       }
+
+      await this.replacePreparedUpdate(null);
 
       return {
         available: false,
@@ -102,12 +111,43 @@ export class UpdateService {
     }
   }
 
+  async runUpdateOperation(
+    update: PreparedUpdate,
+    operation: () => Promise<void>,
+  ): Promise<boolean> {
+    if (this.preparedUpdate !== update) {
+      throw new Error('Prepared update is stale');
+    }
+    return this.updateOperationGate.run(operation);
+  }
+
+  async discardPreparedUpdate(update: PreparedUpdate): Promise<void> {
+    if (this.preparedUpdate !== update) return;
+    this.preparedUpdate = null;
+    try {
+      await update.close();
+    } catch (error) {
+      console.error('Failed to close updater resource:', error);
+    }
+  }
+
+  private async replacePreparedUpdate(update: PreparedUpdate | null): Promise<void> {
+    const previous = this.preparedUpdate;
+    this.preparedUpdate = update;
+    if (!previous || previous === update) return;
+    try {
+      await previous.close();
+    } catch (error) {
+      console.error('Failed to close superseded updater resource:', error);
+    }
+  }
+
   /**
    * Get the current app version
    * @returns Promise with version string
    */
   async getCurrentVersion(): Promise<string> {
-    return getVersion();
+    return this.readVersion();
   }
 
   /**

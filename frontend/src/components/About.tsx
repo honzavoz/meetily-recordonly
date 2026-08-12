@@ -7,6 +7,7 @@ import { Button } from './ui/button';
 import { Loader2, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAppVersion } from '@/hooks/useAppVersion';
+import { normalizeUpdaterError } from '@/lib/updater-flow';
 
 
 export function About() {
@@ -25,9 +26,11 @@ export function About() {
             } else {
                 toast.success('You are running the latest version');
             }
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('Failed to check for updates:', error);
-            toast.error('Failed to check for updates: ' + (error.message || 'Unknown error'));
+            toast.error(
+                'Failed to check for updates: ' + normalizeUpdaterError(error, 'Unknown error'),
+            );
         } finally {
             setIsChecking(false);
         }
