@@ -32,7 +32,7 @@ interface SummaryGeneratorButtonGroupProps {
   onGenerateSummary: (customPrompt: string) => Promise<void>;
   onStopGeneration: () => void;
   customPrompt: string;
-  summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
+  summaryStatus: 'idle' | 'queued' | 'processing' | 'summarizing' | 'regenerating' | 'cancelling' | 'completed' | 'error';
   availableTemplates: Array<{ id: string, name: string, description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
@@ -248,7 +248,11 @@ export function SummaryGeneratorButtonGroup({
     }
   };
 
-  const isGenerating = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const isGenerating = summaryStatus === 'queued'
+    || summaryStatus === 'processing'
+    || summaryStatus === 'summarizing'
+    || summaryStatus === 'regenerating'
+    || summaryStatus === 'cancelling';
 
   return (
     <ButtonGroup>
@@ -262,10 +266,21 @@ export function SummaryGeneratorButtonGroup({
             Analytics.trackButtonClick('stop_summary_generation', 'meeting_details');
             onStopGeneration();
           }}
-          title="Stop summary generation"
+          disabled={summaryStatus === 'cancelling'}
+          title={summaryStatus === 'queued' ? 'Cancel queued summary' : 'Stop summary generation'}
         >
-          <Square className="xl:mr-2" size={18} fill="currentColor" />
-          <span className="hidden sm:inline">Stop</span>
+          {summaryStatus === 'cancelling' ? (
+            <Loader2 className="animate-spin xl:mr-2" size={18} />
+          ) : (
+            <Square className="xl:mr-2" size={18} fill="currentColor" />
+          )}
+          <span className="hidden sm:inline">
+            {summaryStatus === 'queued'
+              ? 'Cancel queued'
+              : summaryStatus === 'cancelling'
+                ? 'Cancelling...'
+                : 'Stop'}
+          </span>
         </Button>
       ) : (
         <Button

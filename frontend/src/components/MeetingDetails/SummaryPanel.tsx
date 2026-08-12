@@ -56,7 +56,8 @@ interface SummaryPanelProps {
   onCopySummary: () => Promise<void>;
   onOpenFolder: () => Promise<void>;
   aiSummary: Summary | null;
-  summaryStatus: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
+  summaryStatus: 'idle' | 'queued' | 'processing' | 'summarizing' | 'regenerating' | 'cancelling' | 'completed' | 'error';
+  summaryQueuePosition?: number | null;
   transcripts: Transcript[];
   modelConfig: ModelConfig;
   setModelConfig: (config: ModelConfig | ((prev: ModelConfig) => ModelConfig)) => void;
@@ -70,7 +71,7 @@ interface SummaryPanelProps {
   onDirtyChange: (isDirty: boolean) => void;
   summaryError: string | null;
   onRegenerateSummary: () => Promise<void>;
-  getSummaryStatusMessage: (status: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error') => string;
+  getSummaryStatusMessage: (status: 'idle' | 'queued' | 'processing' | 'summarizing' | 'regenerating' | 'cancelling' | 'completed' | 'error') => string;
   availableTemplates: Array<{ id: string, name: string, description: string }>;
   selectedTemplate: string;
   onTemplateSelect: (templateId: string, templateName: string) => void;
@@ -98,6 +99,7 @@ export function SummaryPanel({
   onOpenFolder,
   aiSummary,
   summaryStatus,
+  summaryQueuePosition,
   transcripts,
   modelConfig,
   setModelConfig,
@@ -249,7 +251,11 @@ export function SummaryPanel({
     void persistLatestLanguageSelection();
   };
 
-  const isSummaryLoading = summaryStatus === 'processing' || summaryStatus === 'summarizing' || summaryStatus === 'regenerating';
+  const isSummaryLoading = summaryStatus === 'queued'
+    || summaryStatus === 'processing'
+    || summaryStatus === 'summarizing'
+    || summaryStatus === 'regenerating'
+    || summaryStatus === 'cancelling';
 
   const languageSlot = (
     <Popover open={langPickerOpen} onOpenChange={setLangPickerOpen}>
@@ -404,7 +410,13 @@ export function SummaryPanel({
           <div className="flex items-center justify-center flex-1">
             <div className="text-center">
               <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-              <p className="text-gray-600">Generating AI Summary...</p>
+              <p className="text-gray-600">
+                {summaryStatus === 'queued'
+                  ? `Queued${summaryQueuePosition ? ` · position ${summaryQueuePosition}` : ''}`
+                  : summaryStatus === 'cancelling'
+                    ? 'Cancelling...'
+                    : 'Generating AI Summary...'}
+              </p>
             </div>
           </div>
         </div>
@@ -452,7 +464,9 @@ export function SummaryPanel({
               summaryStatus === 'completed' ? 'bg-green-100 text-green-700' :
                 'bg-blue-100 text-blue-700'
               }`}>
-              <p className="text-sm font-medium">{getSummaryStatusMessage(summaryStatus)}</p>
+              <p className="text-sm font-medium">
+                {getSummaryStatusMessage(summaryStatus)}
+              </p>
             </div>
           )}
         </div>

@@ -10,6 +10,13 @@ import { projectService } from '@/services/projectService';
 import type { MeetingProjectView, Project } from '@/types/projects';
 import { filterMeetingsForProjectView } from '@/lib/meeting-projects';
 import type { ProjectColorKey } from '@/lib/project-colors';
+import {
+  isActiveSummaryJob,
+  toSummaryJob,
+  upsertSummaryJob,
+  type SummaryBackendStatus,
+  type SummaryJob,
+} from '@/lib/summary-queue';
 
 
 interface SidebarItem {
@@ -57,10 +64,15 @@ interface SidebarContextType {
   serverAddress: string;
   transcriptServerAddress: string;
   setTranscriptServerAddress: (address: string) => void;
-  // Summary polling management
-  activeSummaryPolls: Map<string, NodeJS.Timeout>;
-  startSummaryPolling: (meetingId: string, processId: string, onUpdate: (result: any) => void) => void;
-  stopSummaryPolling: (meetingId: string) => void;
+  summaryJobs: Record<string, SummaryJob>;
+  trackSummaryJob: (response: SummaryBackendStatus) => void;
+  refreshSummaryJob: (meetingId: string) => Promise<SummaryBackendStatus>;
+  cancelSummaryJob: (meetingId: string, jobId: string) => Promise<void>;
+  startSummaryPolling: (
+    meetingId: string,
+    processId: string,
+    onUpdate: (result: any) => void,
+  ) => void;
   // Refetch meetings from backend
   refetchMeetings: () => Promise<void>;
   projects: Project[];
@@ -98,7 +110,14 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const [isSearching, setIsSearching] = useState(false);
   const [serverAddress, setServerAddress] = useState('');
   const [transcriptServerAddress, setTranscriptServerAddress] = useState('');
-  const [activeSummaryPolls, setActiveSummaryPolls] = useState<Map<string, NodeJS.Timeout>>(new Map());
+  const [summaryJobs, setSummaryJobs] = useState<Record<string, SummaryJob>>({});
+  const summaryPollersRef = React.useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const summaryPollsInFlightRef = React.useRef(new Set<string>());
+  const summaryPollFailuresRef = React.useRef(new Map<string, number>());
+  const summaryPollCallbacksRef = React.useRef(
+    new Map<string, (result: any) => void>(),
+  );
+  const pollSummaryJobRef = React.useRef<(meetingId: string) => Promise<void>>(async () => {});
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectView, setActiveProjectView] = useState<MeetingProjectView>({ type: 'all' });
   const [isProjectsLoading, setIsProjectsLoading] = useState(false);
@@ -244,100 +263,102 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // Summary polling management
+  const stopSummaryPolling = React.useCallback((meetingId: string) => {
+    const timer = summaryPollersRef.current.get(meetingId);
+    if (timer) clearTimeout(timer);
+    summaryPollersRef.current.delete(meetingId);
+    summaryPollFailuresRef.current.delete(meetingId);
+  }, []);
+
+  const ensureSummaryPolling = React.useCallback((meetingId: string, delay = 0) => {
+    if (
+      summaryPollersRef.current.has(meetingId)
+      || summaryPollsInFlightRef.current.has(meetingId)
+    ) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      summaryPollersRef.current.delete(meetingId);
+      void pollSummaryJobRef.current(meetingId);
+    }, delay);
+    summaryPollersRef.current.set(meetingId, timer);
+  }, []);
+
+  const refreshSummaryJob = React.useCallback(async (meetingId: string) => {
+    const response = await invoke<SummaryBackendStatus>('api_get_summary', { meetingId });
+    const job = toSummaryJob(response);
+    setSummaryJobs((current) => upsertSummaryJob(current, job));
+    summaryPollCallbacksRef.current.get(meetingId)?.(response);
+    if (!isActiveSummaryJob(job)) summaryPollCallbacksRef.current.delete(meetingId);
+    return response;
+  }, []);
+
+  pollSummaryJobRef.current = async (meetingId: string) => {
+    if (summaryPollsInFlightRef.current.has(meetingId)) return;
+    summaryPollsInFlightRef.current.add(meetingId);
+    let nextDelay: number | null = null;
+
+    try {
+      const response = await refreshSummaryJob(meetingId);
+      const job = toSummaryJob(response);
+      summaryPollFailuresRef.current.delete(meetingId);
+      if (isActiveSummaryJob(job)) nextDelay = 2000;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failures = (summaryPollFailuresRef.current.get(meetingId) ?? 0) + 1;
+      summaryPollFailuresRef.current.set(meetingId, failures);
+      setSummaryJobs((current) => {
+        const job = current[meetingId];
+        return job
+          ? upsertSummaryJob(current, { ...job, error: message })
+          : current;
+      });
+      const retryDelays = [2000, 4000, 8000, 15000];
+      nextDelay = retryDelays[Math.min(failures - 1, retryDelays.length - 1)];
+    } finally {
+      summaryPollsInFlightRef.current.delete(meetingId);
+      if (nextDelay !== null) ensureSummaryPolling(meetingId, nextDelay);
+    }
+  };
+
+  const trackSummaryJob = React.useCallback((response: SummaryBackendStatus) => {
+    const job = toSummaryJob(response);
+    setSummaryJobs((current) => upsertSummaryJob(current, job));
+    if (isActiveSummaryJob(job)) ensureSummaryPolling(job.meetingId);
+  }, [ensureSummaryPolling]);
+
   const startSummaryPolling = React.useCallback((
     meetingId: string,
     processId: string,
-    onUpdate: (result: any) => void
+    onUpdate: (result: any) => void,
   ) => {
-    // Stop existing poll for this meeting if any
-    if (activeSummaryPolls.has(meetingId)) {
-      clearInterval(activeSummaryPolls.get(meetingId)!);
-    }
+    summaryPollCallbacksRef.current.set(meetingId, onUpdate);
+    trackSummaryJob({
+      meeting_id: meetingId,
+      process_id: processId,
+      status: 'pending',
+    });
+  }, [trackSummaryJob]);
 
-    console.log(`📊 Starting polling for meeting ${meetingId}, process ${processId}`);
-
-    let pollCount = 0;
-    const MAX_POLLS = 200; // ~16.5 minutes at 5-second intervals (slightly longer than backend's 15-min timeout to avoid race conditions)
-
-    const pollInterval = setInterval(async () => {
-      pollCount++;
-
-      // Timeout safety: Stop after 10 minutes
-      if (pollCount >= MAX_POLLS) {
-        console.warn(`⏱️ Polling timeout for ${meetingId} after ${MAX_POLLS} iterations`);
-        clearInterval(pollInterval);
-        setActiveSummaryPolls(prev => {
-          const next = new Map(prev);
-          next.delete(meetingId);
-          return next;
-        });
-        onUpdate({
-          status: 'error',
-          error: 'Summary generation timed out after 15 minutes. Please try again or check your model configuration.'
-        });
-        return;
-      }
-      try {
-        const result = await invoke('api_get_summary', {
-          meetingId: meetingId,
-        }) as any;
-
-        console.log(`📊 Polling update for ${meetingId}:`, result.status);
-
-        // Call the update callback with result
-        onUpdate(result);
-
-        // Stop polling if completed, error, failed, cancelled, or idle (after initial processing)
-        if (result.status === 'completed' || result.status === 'error' || result.status === 'failed' || result.status === 'cancelled') {
-          console.log(`Polling completed for ${meetingId}, status: ${result.status}`);
-          clearInterval(pollInterval);
-          setActiveSummaryPolls(prev => {
-            const next = new Map(prev);
-            next.delete(meetingId);
-            return next;
-          });
-        } else if (result.status === 'idle' && pollCount > 1) {
-          // If we get 'idle' after polling started, process completed/disappeared
-          console.log(`Process completed or not found for ${meetingId}, stopping poll`);
-          clearInterval(pollInterval);
-          setActiveSummaryPolls(prev => {
-            const next = new Map(prev);
-            next.delete(meetingId);
-            return next;
-          });
-        }
-      } catch (error) {
-        console.error(`Polling error for ${meetingId}:`, error);
-        // Report error to callback
-        onUpdate({
-          status: 'error',
-          error: error instanceof Error ? error.message : 'Unknown error'
-        });
-        clearInterval(pollInterval);
-        setActiveSummaryPolls(prev => {
-          const next = new Map(prev);
-          next.delete(meetingId);
-          return next;
-        });
-      }
-    }, 5000); // Poll every 5 seconds
-
-    setActiveSummaryPolls(prev => new Map(prev).set(meetingId, pollInterval));
-  }, [activeSummaryPolls]);
-
-  const stopSummaryPolling = React.useCallback((meetingId: string) => {
-    const pollInterval = activeSummaryPolls.get(meetingId);
-    if (pollInterval) {
-      console.log(`⏹️ Stopping polling for meeting ${meetingId}`);
-      clearInterval(pollInterval);
-      setActiveSummaryPolls(prev => {
-        const next = new Map(prev);
-        next.delete(meetingId);
-        return next;
+  const cancelSummaryJob = React.useCallback(async (meetingId: string, jobId: string) => {
+    const result = await invoke<{ status: string }>('api_cancel_summary', {
+      meetingId,
+      processId: jobId,
+    });
+    setSummaryJobs((current) => {
+      const active = current[meetingId];
+      if (!active || active.jobId !== jobId) return current;
+      return upsertSummaryJob(current, {
+        ...active,
+        phase: result.status === 'cancelled' ? 'cancelled' : 'cancelling',
+        queuePosition: null,
+        error: null,
       });
-    }
-  }, [activeSummaryPolls]);
+    });
+    if (result.status === 'cancelling') ensureSummaryPolling(meetingId);
+    else stopSummaryPolling(meetingId);
+  }, [ensureSummaryPolling, stopSummaryPolling]);
 
   const assignProject = React.useCallback(async (meetingId: string, project: Project) => {
     const previousMeetings = meetings;
@@ -505,13 +526,15 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     }
   }, [activeProjectView, meetings, projects]);
 
-  // Cleanup all polling intervals on unmount
+  // Provider lifetime owns summary polling; page navigation must not stop it.
   useEffect(() => {
     return () => {
-      console.log('🧹 Cleaning up all summary polling intervals');
-      activeSummaryPolls.forEach(interval => clearInterval(interval));
+      summaryPollersRef.current.forEach((timer) => clearTimeout(timer));
+      summaryPollersRef.current.clear();
+      summaryPollsInFlightRef.current.clear();
+      summaryPollCallbacksRef.current.clear();
     };
-  }, [activeSummaryPolls]);
+  }, []);
 
 
 
@@ -534,9 +557,11 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       serverAddress,
       transcriptServerAddress,
       setTranscriptServerAddress,
-      activeSummaryPolls,
+      summaryJobs,
+      trackSummaryJob,
+      refreshSummaryJob,
+      cancelSummaryJob,
       startSummaryPolling,
-      stopSummaryPolling,
       refetchMeetings: fetchMeetings,
       projects,
       activeProjectView,

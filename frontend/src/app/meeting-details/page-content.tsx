@@ -243,6 +243,7 @@ export default function PageContent({
               onOpenFolder={meetingOperations.handleOpenMeetingFolder}
               aiSummary={meetingData.aiSummary}
               summaryStatus={summaryGeneration.summaryStatus}
+              summaryQueuePosition={summaryGeneration.summaryQueuePosition}
               transcripts={meetingData.transcripts}
               modelConfig={modelConfig}
               setModelConfig={setModelConfig}

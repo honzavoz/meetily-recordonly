@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Transcript, Summary } from '@/types';
 import { ModelConfig } from '@/components/ModelSettingsModal';
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
@@ -12,6 +12,7 @@ import {
   readMeetingSummaryLanguage,
   readCachedDetectedSummaryLanguage,
 } from '@/lib/summary-language-preferences';
+import { isActiveSummaryJob, type SummaryBackendStatus } from '@/lib/summary-queue';
 
 async function resolveSummaryLanguage(
   meetingId: string,
@@ -48,7 +49,7 @@ async function resolveSummaryLanguage(
   }
 }
 
-type SummaryStatus = 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
+type SummaryStatus = 'idle' | 'queued' | 'processing' | 'summarizing' | 'regenerating' | 'cancelling' | 'completed' | 'error';
 
 interface UseSummaryGenerationProps {
   meeting: any;
@@ -76,17 +77,29 @@ export function useSummaryGeneration({
   const [summaryStatus, setSummaryStatus] = useState<SummaryStatus>('idle');
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
-  const { startSummaryPolling, stopSummaryPolling } = useSidebar();
+  const {
+    startSummaryPolling,
+    summaryJobs,
+    trackSummaryJob,
+    cancelSummaryJob,
+  } = useSidebar();
+  const activeJob = summaryJobs[meeting.id];
+  const generationRequestInFlightRef = useRef(false);
+  const handledTerminalJobIdRef = useRef<string | null>(null);
 
   // Helper to get status message
   const getSummaryStatusMessage = useCallback((status: SummaryStatus) => {
     switch (status) {
+      case 'queued':
+        return 'Queued for summary generation...';
       case 'processing':
         return 'Processing transcript...';
       case 'summarizing':
         return 'Generating summary...';
       case 'regenerating':
         return 'Regenerating summary...';
+      case 'cancelling':
+        return 'Cancelling summary generation...';
       case 'completed':
         return 'Summary completed';
       case 'error':
@@ -118,28 +131,6 @@ export function useSummaryGeneration({
 
       console.log('Processing transcript with template:', selectedTemplate);
 
-      // Calculate time since recording
-      const timeSinceRecording = (Date.now() - new Date(meeting.created_at).getTime()) / 60000; // minutes
-
-      // Track summary generation started
-      await Analytics.trackSummaryGenerationStarted(
-        modelConfig.provider,
-        modelConfig.model,
-        transcriptText.length,
-        timeSinceRecording
-      );
-
-      // Track custom prompt usage if present
-      if (customPrompt.trim().length > 0) {
-        await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
-      }
-
-      // Show toast notification for generation start
-      toast.info(`${isRegeneration ? 'Regenerating' : 'Generating'} summary...`, {
-        description: `Using ${modelConfig.provider}/${modelConfig.model}`,
-        duration: 3000,
-      });
-
       // Resolve explicit metadata override first; Auto detects the transcript language.
       const summaryLanguage = await resolveSummaryLanguage(
         meeting.id,
@@ -157,9 +148,39 @@ export function useSummaryGeneration({
         customPrompt: customPrompt,
         templateId: selectedTemplate,
         summaryLanguage,
-      }) as any;
+      }) as SummaryBackendStatus;
+
+      trackSummaryJob(result);
+
+      if (result.already_active) {
+        toast.info('Summary generation is already queued', {
+          description: result.queue_position
+            ? `Current queue position: ${result.queue_position}`
+            : 'The existing job is still active.',
+        });
+      } else {
+        const timeSinceRecording = (
+          Date.now() - new Date(meeting.created_at).getTime()
+        ) / 60000;
+        await Analytics.trackSummaryGenerationStarted(
+          modelConfig.provider,
+          modelConfig.model,
+          transcriptText.length,
+          timeSinceRecording,
+        );
+        if (customPrompt.trim().length > 0) {
+          await Analytics.trackCustomPromptUsed(customPrompt.trim().length);
+        }
+        toast.info(`${isRegeneration ? 'Regenerating' : 'Generating'} summary...`, {
+          description: result.queue_position
+            ? `Queued at position ${result.queue_position}`
+            : `Using ${modelConfig.provider}/${modelConfig.model}`,
+          duration: 3000,
+        });
+      }
 
       const process_id = result.process_id;
+      if (!process_id) throw new Error('Backend did not return a summary job ID');
       console.log('Process ID:', process_id);
 
       // Start global polling via context
@@ -396,6 +417,68 @@ export function useSummaryGeneration({
     setAiSummary,
     updateMeetingTitle,
     onMeetingUpdated,
+    trackSummaryJob,
+  ]);
+
+  useEffect(() => {
+    if (!activeJob) return;
+
+    if (activeJob.phase === 'reserved' || activeJob.phase === 'queued') {
+      setSummaryStatus('queued');
+      setSummaryError(activeJob.error);
+      return;
+    }
+    if (activeJob.phase === 'generating') {
+      setSummaryStatus('summarizing');
+      setSummaryError(activeJob.error);
+      return;
+    }
+    if (activeJob.phase === 'cancelling') {
+      setSummaryStatus('cancelling');
+      return;
+    }
+    if (handledTerminalJobIdRef.current === activeJob.jobId) return;
+    handledTerminalJobIdRef.current = activeJob.jobId;
+
+    let cancelled = false;
+    const synchronizeTerminalSummary = async () => {
+      try {
+        const response = await invokeTauri<SummaryBackendStatus>('api_get_summary', {
+          meetingId: meeting.id,
+        });
+        if (cancelled) return;
+
+        if (response.data) setAiSummary(response.data as Summary);
+        if (response.meetingName) updateMeetingTitle(response.meetingName);
+
+        if (activeJob.phase === 'completed') {
+          setSummaryStatus('completed');
+          setSummaryError(null);
+          await onMeetingUpdated?.();
+        } else if (activeJob.phase === 'cancelled') {
+          setSummaryStatus(response.data ? 'completed' : 'idle');
+          setSummaryError(null);
+        } else {
+          setSummaryStatus('error');
+          setSummaryError(activeJob.error || 'Summary generation failed');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setSummaryStatus('error');
+        setSummaryError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void synchronizeTerminalSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeJob,
+    meeting.id,
+    onMeetingUpdated,
+    setAiSummary,
+    updateMeetingTitle,
   ]);
 
   // Helper function to fetch ALL transcripts for summary generation
@@ -453,7 +536,7 @@ export function useSummaryGeneration({
   }, []);
 
   // Public API: Generate summary from transcripts
-  const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+  const prepareSummaryGeneration = useCallback(async (customPrompt: string = '') => {
     // Check if model config is still loading
     if (isModelConfigLoading) {
       console.log('⏳ Model configuration is still loading, please wait...');
@@ -616,8 +699,18 @@ export function useSummaryGeneration({
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary, modelConfig, isModelConfigLoading, selectedTemplate]);
 
+  const handleGenerateSummary = useCallback(async (customPrompt: string = '') => {
+    if (generationRequestInFlightRef.current || isActiveSummaryJob(activeJob)) return;
+    generationRequestInFlightRef.current = true;
+    try {
+      await prepareSummaryGeneration(customPrompt);
+    } finally {
+      generationRequestInFlightRef.current = false;
+    }
+  }, [activeJob, prepareSummaryGeneration]);
+
   // Public API: Regenerate summary from the current saved transcript
-  const handleRegenerateSummary = useCallback(async () => {
+  const prepareSummaryRegeneration = useCallback(async () => {
     const allTranscripts = await fetchAllTranscripts(meeting.id);
 
     if (!allTranscripts.length) {
@@ -632,37 +725,43 @@ export function useSummaryGeneration({
     });
   }, [meeting.id, fetchAllTranscripts, buildSummaryTranscriptPayload, processSummary]);
 
+  const handleRegenerateSummary = useCallback(async () => {
+    if (generationRequestInFlightRef.current || isActiveSummaryJob(activeJob)) return;
+    generationRequestInFlightRef.current = true;
+    try {
+      await prepareSummaryRegeneration();
+    } finally {
+      generationRequestInFlightRef.current = false;
+    }
+  }, [activeJob, prepareSummaryRegeneration]);
+
   // Public API: Stop ongoing summary generation
   const handleStopGeneration = useCallback(async () => {
     console.log('Stopping summary generation for meeting:', meeting.id);
 
+    if (!activeJob || !isActiveSummaryJob(activeJob)) return;
+
     try {
-      // Call backend to cancel the summary generation
-      await invokeTauri('api_cancel_summary', {
-        meetingId: meeting.id
-      });
+      await cancelSummaryJob(meeting.id, activeJob.jobId);
       console.log('✓ Backend cancellation request sent for meeting:', meeting.id);
+      setSummaryStatus(activeJob.phase === 'queued' ? 'idle' : 'cancelling');
+      setSummaryError(null);
+      toast.info(
+        activeJob.phase === 'queued'
+          ? 'Queued summary cancelled'
+          : 'Cancelling summary generation...',
+      );
     } catch (error) {
       console.error('Failed to cancel summary generation:', error);
-      // Continue with frontend cleanup even if backend call fails
+      toast.error('Failed to cancel summary generation', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
-
-    // Stop polling
-    stopSummaryPolling(meeting.id);
-
-    // Reset status to idle
-    setSummaryStatus('idle');
-    setSummaryError(null);
-
-    // Show toast notification
-    toast.info('Summary generation stopped', {
-      description: 'You can generate a new summary anytime',
-      duration: 3000,
-    });
-  }, [meeting.id, stopSummaryPolling]);
+  }, [activeJob, cancelSummaryJob, meeting.id]);
 
   return {
     summaryStatus,
+    summaryQueuePosition: activeJob?.queuePosition ?? null,
     summaryError,
     handleGenerateSummary,
     handleRegenerateSummary,

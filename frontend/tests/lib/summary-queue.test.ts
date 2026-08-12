@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  isActiveSummaryJob,
+  toSummaryJob,
+  upsertSummaryJob,
+  type SummaryJob,
+} from "../../src/lib/summary-queue";
 
 const tauriSource = (path: string) =>
   readFileSync(resolve(import.meta.dir, `../../src-tauri/src/${path}`), "utf8");
@@ -37,5 +43,105 @@ describe("summary generation queue backend contracts", () => {
     expect(service).toContain("cancellation_token: CancellationToken");
     expect(commands).toContain("process_id: Option<String>");
     expect(commands).toContain("SUMMARY_QUEUE.cancel(&meeting_id, &job_id).await");
+  });
+
+  test("keeps polling in the provider and guards duplicate requests in the meeting hook", () => {
+    const provider = readFileSync(
+      resolve(import.meta.dir, "../../src/components/Sidebar/SidebarProvider.tsx"),
+      "utf8",
+    );
+    const hook = readFileSync(
+      resolve(import.meta.dir, "../../src/hooks/meeting-details/useSummaryGeneration.ts"),
+      "utf8",
+    );
+    const page = readFileSync(
+      resolve(import.meta.dir, "../../src/app/meeting-details/page.tsx"),
+      "utf8",
+    );
+    const sidebar = readFileSync(
+      resolve(import.meta.dir, "../../src/components/Sidebar/index.tsx"),
+      "utf8",
+    );
+
+    expect(provider).toContain("summaryPollersRef");
+    expect(provider).toContain("summaryJobs: Record<string, SummaryJob>");
+    expect(provider).toContain("processId: jobId");
+    expect(hook).toContain("generationRequestInFlightRef");
+    expect(hook).toContain("trackSummaryJob(result)");
+    expect(hook).toContain("cancelSummaryJob(meeting.id, activeJob.jobId)");
+    expect(hook).not.toContain("stopSummaryPolling(meeting.id)");
+    expect(page).not.toContain("stopSummaryPolling");
+    expect(sidebar).toContain("Queued #");
+    expect(sidebar).toContain("Generating");
+  });
+});
+
+describe("summary generation queue frontend state", () => {
+  test("maps backend pending status to a visible FIFO position", () => {
+    expect(
+      toSummaryJob({
+        meeting_id: "b",
+        process_id: "job-b",
+        status: "pending",
+        queue_position: 2,
+      }),
+    ).toEqual({
+      meetingId: "b",
+      jobId: "job-b",
+      phase: "queued",
+      queuePosition: 2,
+      error: null,
+    });
+  });
+
+  test("terminal updates replace only their meeting", () => {
+    const initialJobs = {
+      a: {
+        meetingId: "a",
+        jobId: "job-a",
+        phase: "generating",
+        queuePosition: null,
+        error: null,
+      },
+      b: {
+        meetingId: "b",
+        jobId: "job-b",
+        phase: "queued",
+        queuePosition: 1,
+        error: null,
+      },
+    } satisfies Record<string, SummaryJob>;
+    const completedA: SummaryJob = {
+      meetingId: "a",
+      jobId: "job-a",
+      phase: "completed",
+      queuePosition: null,
+      error: null,
+    };
+
+    const state = upsertSummaryJob(initialJobs, completedA);
+
+    expect(state.a.phase).toBe("completed");
+    expect(state.b).toEqual(initialJobs.b);
+    expect(isActiveSummaryJob(state.a)).toBe(false);
+    expect(isActiveSummaryJob(state.b)).toBe(true);
+  });
+
+  test("maps cancelling and terminal backend statuses without losing job identity", () => {
+    expect(
+      toSummaryJob({
+        meeting_id: "a",
+        process_id: "job-a",
+        status: "cancelling",
+      }),
+    ).toMatchObject({ phase: "cancelling", jobId: "job-a" });
+    expect(
+      toSummaryJob({
+        meeting_id: "a",
+        process_id: "job-a",
+        status: "failed",
+        error: "provider unavailable",
+      }),
+    ).toMatchObject({ phase: "failed", error: "provider unavailable" });
   });
 });

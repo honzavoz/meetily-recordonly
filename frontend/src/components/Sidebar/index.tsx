@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, Upload, FileAudio, FolderOpen, Play } from 'lucide-react';
+import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, Upload, FileAudio, FolderOpen, Play, Loader2 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
 import type { CurrentMeeting } from '@/components/Sidebar/SidebarProvider';
@@ -93,6 +93,7 @@ const Sidebar: React.FC = () => {
     renameProject,
     updateProjectColor,
     deleteProject,
+    summaryJobs,
   } = useSidebar();
 
   // Get recording state from RecordingStateContext (single source of truth)
@@ -743,6 +744,7 @@ const Sidebar: React.FC = () => {
     const paddingLeft = `${depth * 12 + 12}px`;
     const isActive = item.type === 'file' && currentMeeting?.id === item.id;
     const isMeetingItem = item.id.includes('-') && !item.id.startsWith('intro-call');
+    const summaryJob = summaryJobs[item.id];
 
     // Check if this item has a matching transcript snippet
     const matchingResult = isMeetingItem ? findMatchingSnippet(item.id) : null;
@@ -803,7 +805,24 @@ const Sidebar: React.FC = () => {
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="break-words leading-tight">{item.title}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    <div className="min-w-0 flex-1 break-words leading-tight">{item.title}</div>
+                    {summaryJob?.phase === 'queued' && (
+                      <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                        Queued #{summaryJob.queuePosition ?? '–'}
+                      </span>
+                    )}
+                    {summaryJob?.phase === 'generating' && (
+                      <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Generating
+                      </span>
+                    )}
+                    {summaryJob?.phase === 'cancelling' && (
+                      <span className="shrink-0 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold text-gray-600">
+                        Cancelling
+                      </span>
+                    )}
+                  </div>
                   {isMeetingItem && getSidebarMeetingSubtitle(item) && (
                     <div className="mt-0.5 truncate text-xs font-normal text-gray-500">
                       {getSidebarMeetingSubtitle(item)}
