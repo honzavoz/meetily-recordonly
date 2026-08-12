@@ -48,12 +48,23 @@ impl SummaryProcessesRepository {
         }
         let now = Utc::now();
 
-        sqlx::query("UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?")
-            .bind(&result_json.unwrap())
-            .bind(now)
-            .bind(meeting_id)
-            .execute(&mut *transaction)
-            .await?;
+        let summary_update = sqlx::query(
+            "UPDATE summary_processes SET result = ?, updated_at = ? WHERE meeting_id = ?",
+        )
+        .bind(&result_json.unwrap())
+        .bind(now)
+        .bind(meeting_id)
+        .execute(&mut *transaction)
+        .await?;
+
+        if summary_update.rows_affected() != 1 {
+            log_info!(
+                "Attempted to save summary without a summary process for meeting_id: {}",
+                meeting_id
+            );
+            transaction.rollback().await?;
+            return Ok(false);
+        }
 
         sqlx::query("UPDATE meetings SET updated_at = ? WHERE id = ?")
             .bind(now)
@@ -312,7 +323,71 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        sqlx::query(
+            r#"
+            CREATE TABLE meetings (
+                id TEXT PRIMARY KEY,
+                updated_at TEXT
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         pool
+    }
+
+    #[tokio::test]
+    async fn update_meeting_summary_persists_the_new_result() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO meetings (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)")
+            .bind("meeting-save")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result) VALUES (?, 'completed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)",
+        )
+        .bind("meeting-save")
+        .bind(r#"{"markdown":"old"}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let edited = serde_json::json!({"markdown": "edited"});
+        let updated =
+            SummaryProcessesRepository::update_meeting_summary(&pool, "meeting-save", &edited)
+                .await
+                .unwrap();
+
+        assert!(updated);
+        let stored: String =
+            sqlx::query_scalar("SELECT result FROM summary_processes WHERE meeting_id = ?")
+                .bind("meeting-save")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), edited);
+    }
+
+    #[tokio::test]
+    async fn update_meeting_summary_returns_false_without_summary_row() {
+        let pool = test_pool().await;
+        sqlx::query("INSERT INTO meetings (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)")
+            .bind("meeting-without-summary")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let updated = SummaryProcessesRepository::update_meeting_summary(
+            &pool,
+            "meeting-without-summary",
+            &serde_json::json!({"markdown": "edited"}),
+        )
+        .await
+        .unwrap();
+
+        assert!(!updated);
     }
 
     #[tokio::test]

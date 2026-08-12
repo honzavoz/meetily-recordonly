@@ -4,6 +4,11 @@ import { BlockNoteSummaryViewRef } from '@/components/AISummary/BlockNoteSummary
 import { CurrentMeeting, useSidebar } from '@/components/Sidebar/SidebarProvider';
 import { invoke as invokeTauri } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
+import {
+  persistMeetingSummary,
+  saveDirtyMeetingChanges,
+  type SummarySaveInput,
+} from '@/lib/summary-saving';
 
 interface UseMeetingDataProps {
   meeting: any;
@@ -20,11 +25,12 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const [isTitleDirty, setIsTitleDirty] = useState(false);
   const [aiSummary, setAiSummary] = useState<Summary | null>(summaryData);
   const [isSaving, setIsSaving] = useState(false);
-  const [, setIsSummaryDirty] = useState(false);
+  const [isSummaryDirty, setIsSummaryDirty] = useState(false);
   const [, setError] = useState<string>('');
 
   // Ref for BlockNoteSummaryView
   const blockNoteSummaryRef = useRef<BlockNoteSummaryViewRef>(null);
+  const legacySummaryRevisionRef = useRef(0);
 
   // Sidebar context
   const { setCurrentMeeting, setMeetings, meetings: sidebarMeetings } = useSidebar();
@@ -42,7 +48,9 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   }, []);
 
   const handleSummaryChange = useCallback((newSummary: Summary) => {
+    legacySummaryRevisionRef.current += 1;
     setAiSummary(newSummary);
+    setIsSummaryDirty(true);
   }, []);
 
   const handleSaveMeetingTitle = useCallback(async () => {
@@ -62,57 +70,45 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
       setMeetings(updatedMeetings);
       const current = updatedMeetings.find((item) => item.id === meeting.id);
       setCurrentMeeting(current ?? { id: meeting.id, title: meetingTitle });
-      return true;
     } catch (error) {
       console.error('Failed to save meeting title:', error);
       if (error instanceof Error) {
         setError(error.message);
+        throw error;
       } else {
         setError('Failed to save meeting title: Unknown error');
+        throw new Error('Failed to save meeting title: Unknown error');
       }
-      return false;
     }
   }, [meeting.id, meetingTitle, sidebarMeetings, setMeetings, setCurrentMeeting]);
 
-  const handleSaveSummary = useCallback(async (summary: Summary | { markdown?: string; summary_json?: any[] }) => {
+  const handleSaveSummary = useCallback(async (
+    summary: SummarySaveInput,
+    summaryRevision?: number,
+  ) => {
     console.log('📄 handleSaveSummary called with:', {
       hasMarkdown: 'markdown' in summary,
       hasSummaryJson: 'summary_json' in summary,
       summaryKeys: Object.keys(summary)
     });
 
+    const savedRevision = summaryRevision ?? legacySummaryRevisionRef.current;
     try {
-      let formattedSummary: any;
-
-      // Check if it's the new BlockNote format
-      if ('markdown' in summary || 'summary_json' in summary) {
-        console.log('📄 Saving new format (markdown/blocknote)');
-        formattedSummary = summary;
-      } else {
-        console.log('📄 Saving legacy format');
-        formattedSummary = {
-          MeetingName: meetingTitle,
-          MeetingNotes: {
-            sections: Object.entries(summary).map(([, section]) => ({
-              title: section.title,
-              blocks: section.blocks
-            }))
-          }
-        };
+      await persistMeetingSummary(meeting.id, meetingTitle, summary);
+      if (savedRevision === legacySummaryRevisionRef.current) {
+        setAiSummary(summary as Summary);
+        setIsSummaryDirty(false);
       }
-
-      await invokeTauri('api_save_meeting_summary', {
-        meetingId: meeting.id,
-        summary: formattedSummary,
-      });
 
       console.log('✅ Save meeting summary success');
     } catch (error) {
       console.error('❌ Failed to save meeting summary:', error);
       if (error instanceof Error) {
         setError(error.message);
+        throw error;
       } else {
         setError('Failed to save meeting summary: Unknown error');
+        throw new Error('Failed to save meeting summary: Unknown error');
       }
     }
   }, [meeting.id, meetingTitle]);
@@ -120,18 +116,27 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
   const saveAllChanges = useCallback(async () => {
     setIsSaving(true);
     try {
-      // Save meeting title only if changed
-      if (isTitleDirty) {
-        await handleSaveMeetingTitle();
-      }
+      const editorSummaryDirty = blockNoteSummaryRef.current?.isDirty ?? false;
+      const summarySnapshot = aiSummary;
+      const summarySnapshotRevision = legacySummaryRevisionRef.current;
+      await saveDirtyMeetingChanges({
+        isTitleDirty,
+        isSummaryDirty: editorSummaryDirty || isSummaryDirty,
+        saveTitle: handleSaveMeetingTitle,
+        saveSummary: async () => {
+          const summaryEditor = blockNoteSummaryRef.current;
+          if (editorSummaryDirty && summaryEditor) {
+            console.log('💾 Saving BlockNote editor changes...');
+            await summaryEditor.saveSummary();
+            return;
+          }
 
-      // Save BlockNote editor changes if dirty
-      if (blockNoteSummaryRef.current?.isDirty) {
-        console.log('💾 Saving BlockNote editor changes...');
-        await blockNoteSummaryRef.current.saveSummary();
-      } else if (aiSummary) {
-        await handleSaveSummary(aiSummary);
-      }
+          if (!summarySnapshot) {
+            throw new Error('Summary content is unavailable');
+          }
+          await handleSaveSummary(summarySnapshot, summarySnapshotRevision);
+        },
+      });
 
       toast.success("Changes saved successfully");
     } catch (error) {
@@ -140,7 +145,7 @@ export function useMeetingData({ meeting, summaryData, onMeetingUpdated }: UseMe
     } finally {
       setIsSaving(false);
     }
-  }, [isTitleDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary]);
+  }, [isTitleDirty, isSummaryDirty, handleSaveMeetingTitle, aiSummary, handleSaveSummary]);
 
   // Update meeting title from external source (e.g., AI summary)
   const updateMeetingTitle = useCallback((newTitle: string) => {

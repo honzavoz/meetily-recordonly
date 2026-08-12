@@ -9,6 +9,7 @@ import { useCreateBlockNote } from '@blocknote/react';
 import { BlockNoteView } from '@blocknote/shadcn';
 import { blocksToMarkdownSafely } from '@/lib/blocknote-markdown';
 import { RESPONSIVE_MARKDOWN_SUMMARY_CLASSES } from '@/lib/responsive-markdown-summary';
+import { shouldClearSummaryDirtyAfterSave } from '@/lib/summary-saving';
 import "@blocknote/shadcn/style.css";
 
 // Dynamically import BlockNote Editor to avoid SSR issues
@@ -16,7 +17,7 @@ const Editor = dynamic(() => import('../BlockNoteEditor/Editor'), { ssr: false }
 
 interface BlockNoteSummaryViewProps {
   summaryData: SummaryDataResponse | Summary | null;
-  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => void;
+  onSave?: (data: { markdown?: string; summary_json?: BlockNoteBlock[] }) => Promise<void>;
   onSummaryChange?: (summary: Summary) => void;
   status?: 'idle' | 'processing' | 'summarizing' | 'regenerating' | 'completed' | 'error';
   error?: string | null;
@@ -81,6 +82,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const [currentBlocks, setCurrentBlocks] = useState<Block[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const isContentLoaded = useRef(false);
+  const editRevisionRef = useRef(0);
 
   // Create BlockNote editor for markdown parsing
   const editor = useCreateBlockNote({
@@ -122,6 +124,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const handleEditorChange = useCallback((blocks: Block[]) => {
     // Only set dirty flag if content has finished loading
     if (isContentLoaded.current) {
+      editRevisionRef.current += 1;
       setCurrentBlocks(blocks);
       setIsDirty(true);
     }
@@ -137,6 +140,7 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
   const handleSave = useCallback(async () => {
     if (!onSave || !isDirty) return;
 
+    const savedRevision = editRevisionRef.current;
     setIsSaving(true);
     try {
       console.log('💾 Saving BlockNote content...');
@@ -154,13 +158,12 @@ export const BlockNoteSummaryView = forwardRef<BlockNoteSummaryViewRef, BlockNot
         saveData.markdown = markdownResult.markdown;
       }
 
-      onSave(saveData);
+      await onSave(saveData);
 
-      setIsDirty(false);
+      if (shouldClearSummaryDirtyAfterSave(savedRevision, editRevisionRef.current)) {
+        setIsDirty(false);
+      }
       console.log('✅ Save successful');
-    } catch (err) {
-      console.error('❌ Save failed:', err);
-      alert('Failed to save changes. Please try again.');
     } finally {
       setIsSaving(false);
     }
