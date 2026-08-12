@@ -17,7 +17,7 @@ describe("UpdateDialog updater ownership", () => {
       /import\s*\{[^}]*\bcheck\b[^}]*\}\s*from\s*["']@tauri-apps\/plugin-updater["']/s,
     );
     expect(source).toContain("updateInfo.preparedUpdate");
-    expect(source).toContain("resolvePreparedUpdate");
+    expect(source).toContain("runPreparedUpdateAttempt");
   });
 
   test("normalizes errors and guards repeated update operations", () => {
@@ -26,7 +26,7 @@ describe("UpdateDialog updater ownership", () => {
     expect(source).toContain("updateService.discardPreparedUpdate");
     expect(source).toContain("operationInFlightRef");
     expect(source).toContain("new PreparedUpdateRetryState()");
-    expect(source).toContain("operationEntered");
+    expect(source).toContain("UpdateAttemptError");
     expect(source).toContain("Try Again");
     expect(aboutSource).toContain("normalizeUpdaterError(error, 'Unknown error')");
   });

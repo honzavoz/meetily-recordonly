@@ -15,7 +15,8 @@ import { toast } from 'sonner';
 import {
   normalizeUpdaterError,
   PreparedUpdateRetryState,
-  resolvePreparedUpdate,
+  runPreparedUpdateAttempt,
+  UpdateAttemptError,
   type PreparedUpdate,
 } from '@/lib/updater-flow';
 
@@ -55,34 +56,31 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
   const handleDownloadAndInstall = async () => {
     if (operationInFlightRef.current) return;
     operationInFlightRef.current = true;
-    let stage: 'prepare' | 'install' = 'prepare';
-    let updateToUse: PreparedUpdate | null = null;
-    let operationEntered = false;
     setError(null);
     setIsPreparing(!update);
 
     try {
-      const preparedUpdate = await resolvePreparedUpdate(
-        {
-          available: Boolean(updateInfo?.available),
-          preparedUpdate: retryStateRef.current.select(update, updateInfo?.preparedUpdate),
-        },
-        () => updateService.checkForUpdates(true),
-      );
-      updateToUse = preparedUpdate;
-      retryStateRef.current.markPrepared(preparedUpdate);
-      setUpdate(preparedUpdate);
-      setIsPreparing(false);
-      setIsDownloading(true);
-      setProgress({ downloaded: 0, total: 0, percentage: 0 });
-      stage = 'install';
-
       let downloaded = 0;
       let contentLength = 0;
 
-      const started = await updateService.runUpdateOperation(preparedUpdate, async () => {
-        operationEntered = true;
-        await preparedUpdate.downloadAndInstall((event) => {
+      await runPreparedUpdateAttempt({
+        info: {
+          available: Boolean(updateInfo?.available),
+          preparedUpdate: updateInfo?.preparedUpdate,
+        },
+        localUpdate: update,
+        retryState: retryStateRef.current,
+        check: () => updateService.checkForUpdates(true),
+        runOperation: (preparedUpdate, operation) =>
+          updateService.runUpdateOperation(preparedUpdate, operation),
+        discard: (preparedUpdate) => updateService.discardPreparedUpdate(preparedUpdate),
+        onPrepared: (preparedUpdate) => {
+          setUpdate(preparedUpdate);
+          setIsPreparing(false);
+          setIsDownloading(true);
+          setProgress({ downloaded: 0, total: 0, percentage: 0 });
+        },
+        onEvent: (event) => {
           switch (event.event) {
             case 'Started':
               contentLength = event.data.contentLength ?? 0;
@@ -104,28 +102,23 @@ export function UpdateDialog({ open, onOpenChange, updateInfo }: UpdateDialogPro
               });
               break;
           }
-        });
-
-        toast.success('Update installed successfully. The app will restart...');
-        setIsDownloading(false);
-        onOpenChange(false);
-        await relaunch();
+        },
+        onInstalled: () => {
+          toast.success('Update installed successfully. The app will restart...');
+          setIsDownloading(false);
+          onOpenChange(false);
+        },
+        relaunch,
       });
-
-      if (!started) {
-        throw new Error('Another update installation is already in progress');
-      }
     } catch (cause: unknown) {
+      const stage = cause instanceof UpdateAttemptError ? cause.stage : 'install';
+      const updaterCause = cause instanceof UpdateAttemptError ? cause.cause : cause;
       console.error(`[UpdateDialog] ${stage} failed`, cause);
-      if (updateToUse && operationEntered) {
-        await updateService.discardPreparedUpdate(updateToUse);
-      }
-      retryStateRef.current.markFailed();
       setUpdate(null);
       const fallback = stage === 'prepare'
         ? 'Unable to prepare the update'
         : 'Unable to download or install the update';
-      const message = normalizeUpdaterError(cause, fallback);
+      const message = normalizeUpdaterError(updaterCause, fallback);
       setError(`${stage === 'prepare' ? 'Failed to prepare update' : 'Update failed'}: ${message}`);
       setIsPreparing(false);
       setIsDownloading(false);

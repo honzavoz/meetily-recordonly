@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   normalizeUpdaterError,
   PreparedUpdateRetryState,
+  runPreparedUpdateAttempt,
   resolvePreparedUpdate,
   UpdateOperationGate,
   type PreparedUpdate,
@@ -112,5 +113,89 @@ describe("PreparedUpdateRetryState", () => {
     expect(retry.select(null, stale)).toBeUndefined();
     retry.markPrepared(replacement);
     expect(retry.select(replacement, stale)).toBe(replacement);
+  });
+});
+
+describe("runPreparedUpdateAttempt", () => {
+  test("installs the provided resource without another check and relaunches", async () => {
+    const events: string[] = [];
+    const prepared: PreparedUpdate = {
+      close: async () => undefined,
+      downloadAndInstall: async (onEvent) => {
+        onEvent?.({ event: "Started", data: { contentLength: 10 } });
+        onEvent?.({ event: "Finished" });
+      },
+    };
+    let checks = 0;
+    let relaunches = 0;
+
+    await runPreparedUpdateAttempt({
+      info: { available: true, preparedUpdate: prepared },
+      retryState: new PreparedUpdateRetryState(),
+      check: async () => { checks += 1; return { available: false }; },
+      runOperation: async (update, operation) => {
+        expect(update).toBe(prepared);
+        await operation();
+        return true;
+      },
+      discard: async () => undefined,
+      onPrepared: (update) => expect(update).toBe(prepared),
+      onEvent: (event) => events.push(event.event),
+      relaunch: async () => { relaunches += 1; },
+    });
+
+    expect(checks).toBe(0);
+    expect(events).toEqual(["Started", "Finished"]);
+    expect(relaunches).toBe(1);
+  });
+
+  test("discards a failed resource and forces a fresh resource on retry", async () => {
+    let closes = 0;
+    let staleDownloads = 0;
+    let replacementDownloads = 0;
+    let checks = 0;
+    const stale: PreparedUpdate = {
+      close: async () => { closes += 1; },
+      downloadAndInstall: async () => {
+        staleDownloads += 1;
+        throw "resource closed";
+      },
+    };
+    const replacement: PreparedUpdate = {
+      close: async () => undefined,
+      downloadAndInstall: async () => { replacementDownloads += 1; },
+    };
+    const retryState = new PreparedUpdateRetryState();
+    let current: PreparedUpdate = stale;
+    const options = {
+      info: { available: true, preparedUpdate: stale },
+      retryState,
+      check: async () => {
+        checks += 1;
+        current = replacement;
+        return { available: true, preparedUpdate: replacement };
+      },
+      runOperation: async (update: PreparedUpdate, operation: () => Promise<void>) => {
+        if (update !== current) throw new Error("Prepared update is stale");
+        await operation();
+        return true;
+      },
+      discard: async (update: PreparedUpdate) => {
+        if (update === current) {
+          await update.close();
+        }
+      },
+      onPrepared: () => undefined,
+      onEvent: () => undefined,
+      relaunch: async () => undefined,
+    };
+
+    await expect(runPreparedUpdateAttempt(options)).rejects.toMatchObject({ stage: "install" });
+    await runPreparedUpdateAttempt(options);
+
+    expect(staleDownloads).toBe(1);
+    expect(replacementDownloads).toBe(1);
+    expect(closes).toBe(1);
+    expect(checks).toBe(1);
   });
 });
