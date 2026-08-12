@@ -1,6 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { PreparedUpdate } from "../../src/lib/updater-flow";
-import { UpdateService } from "../../src/services/updateService";
+
+mock.module("@tauri-apps/plugin-updater", () => ({
+  check: async () => null,
+}));
+mock.module("@tauri-apps/api/app", () => ({
+  getVersion: async () => "0.0.0-test",
+}));
+
+const { UpdateService } = await import("../../src/services/updateService");
 
 describe("UpdateService", () => {
   test("returns the exact updater resource from the successful check", async () => {
