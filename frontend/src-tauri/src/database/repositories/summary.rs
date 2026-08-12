@@ -102,6 +102,7 @@ impl SummaryProcessesRepository {
     pub async fn create_or_reset_process(
         pool: &SqlitePool,
         meeting_id: &str,
+        job_id: &str,
     ) -> Result<(), sqlx::Error> {
         log_info!(
             "Creating or resetting summary process for meeting_id: {}",
@@ -110,22 +111,24 @@ impl SummaryProcessesRepository {
         let now = Utc::now();
         sqlx::query(
             r#"
-            INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, start_time, result, error)
-            VALUES (?, 'PENDING', ?, ?, ?, NULL, NULL)
+            INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, start_time, result, error, metadata)
+            VALUES (?, 'PENDING', ?, ?, NULL, NULL, NULL, json_object('job_id', ?))
             ON CONFLICT(meeting_id) DO UPDATE SET
                 status = 'PENDING',
                 updated_at = excluded.updated_at,
-                start_time = excluded.start_time,
+                start_time = NULL,
+                end_time = NULL,
                 result_backup = result,
                 result_backup_timestamp = excluded.updated_at,
                 result = result,
-                error = NULL
+                error = NULL,
+                metadata = excluded.metadata
             "#
         )
         .bind(meeting_id)
         .bind(now)
         .bind(now)
-        .bind(now)
+        .bind(job_id)
         .execute(pool)
         .await?;
         log_info!(
@@ -133,6 +136,57 @@ impl SummaryProcessesRepository {
             meeting_id
         );
         Ok(())
+    }
+
+    pub async fn mark_process_running(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        job_id: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let now = Utc::now();
+        let result = sqlx::query(
+            r#"
+            UPDATE summary_processes
+            SET status = 'processing', updated_at = ?, start_time = ?, error = NULL
+            WHERE meeting_id = ?
+              AND json_extract(metadata, '$.job_id') = ?
+              AND upper(status) = 'PENDING'
+            "#,
+        )
+        .bind(now)
+        .bind(now)
+        .bind(meeting_id)
+        .bind(job_id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() == 1)
+    }
+
+    pub async fn recover_interrupted_processes(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+        let now = Utc::now();
+        let mut transaction = pool.begin().await?;
+        let result = sqlx::query(
+            r#"
+            UPDATE summary_processes
+            SET
+                status = 'failed',
+                error = 'Summary generation was interrupted when Meetily exited',
+                updated_at = ?,
+                end_time = ?,
+                result = COALESCE(result_backup, result),
+                result_backup = NULL,
+                result_backup_timestamp = NULL
+            WHERE upper(status) IN ('PENDING', 'PROCESSING')
+            "#,
+        )
+        .bind(now)
+        .bind(now)
+        .execute(&mut *transaction)
+        .await?;
+        let recovered = result.rows_affected();
+        transaction.commit().await?;
+        Ok(recovered)
     }
 
     pub async fn update_process_completed(
@@ -352,6 +406,102 @@ mod tests {
         .await
         .unwrap();
         pool
+    }
+
+    async fn insert_meeting(pool: &SqlitePool, meeting_id: &str) {
+        sqlx::query("INSERT INTO meetings (id, updated_at) VALUES (?, CURRENT_TIMESTAMP)")
+            .bind(meeting_id)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    async fn insert_active_process(
+        pool: &SqlitePool,
+        meeting_id: &str,
+        status: &str,
+        backup: Option<&str>,
+    ) {
+        insert_meeting(pool, meeting_id).await;
+        sqlx::query(
+            "INSERT INTO summary_processes (meeting_id, status, created_at, updated_at, result_backup, metadata) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, json_object('job_id', ?))",
+        )
+        .bind(meeting_id)
+        .bind(status)
+        .bind(backup)
+        .bind(format!("job-{meeting_id}"))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    async fn assert_recovered(pool: &SqlitePool, meeting_id: &str, expected_result: &str) {
+        let row: (String, Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT status, result, result_backup, end_time FROM summary_processes WHERE meeting_id = ?",
+        )
+        .bind(meeting_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(row.0, "failed");
+        assert_eq!(row.1.as_deref(), Some(expected_result));
+        assert!(row.2.is_none());
+        assert!(row.3.is_some());
+    }
+
+    #[tokio::test]
+    async fn process_lifecycle_persists_job_id_and_processing_state() {
+        let pool = test_pool().await;
+        insert_meeting(&pool, "meeting-queue").await;
+
+        SummaryProcessesRepository::create_or_reset_process(&pool, "meeting-queue", "job-1")
+            .await
+            .unwrap();
+        assert!(
+            SummaryProcessesRepository::mark_process_running(&pool, "meeting-queue", "job-1")
+                .await
+                .unwrap()
+        );
+
+        let row: (String, String) =
+            sqlx::query_as("SELECT status, metadata FROM summary_processes WHERE meeting_id = ?")
+                .bind("meeting-queue")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.0, "processing");
+        assert_eq!(
+            serde_json::from_str::<Value>(&row.1).unwrap()["job_id"],
+            "job-1"
+        );
+        assert!(!SummaryProcessesRepository::mark_process_running(
+            &pool,
+            "meeting-queue",
+            "stale-job"
+        )
+        .await
+        .unwrap());
+    }
+
+    #[tokio::test]
+    async fn startup_recovery_fails_active_rows_and_restores_backup() {
+        let pool = test_pool().await;
+        insert_active_process(&pool, "queued", "PENDING", Some(r#"{"markdown":"old"}"#)).await;
+        insert_active_process(
+            &pool,
+            "running",
+            "processing",
+            Some(r#"{"markdown":"older"}"#),
+        )
+        .await;
+
+        let recovered = SummaryProcessesRepository::recover_interrupted_processes(&pool)
+            .await
+            .unwrap();
+
+        assert_eq!(recovered, 2);
+        assert_recovered(&pool, "queued", r#"{"markdown":"old"}"#).await;
+        assert_recovered(&pool, "running", r#"{"markdown":"older"}"#).await;
     }
 
     #[tokio::test]

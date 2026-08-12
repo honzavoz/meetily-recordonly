@@ -2,6 +2,7 @@ use log::info;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::manager::DatabaseManager;
+use super::repositories::summary::SummaryProcessesRepository;
 use crate::state::AppState;
 
 /// Initialize database on app startup
@@ -29,6 +30,14 @@ pub async fn initialize_database_on_startup(app: &AppHandle) -> Result<(), Strin
         let db_manager = DatabaseManager::new_from_app_handle(app)
             .await
             .map_err(|e| format!("Failed to initialize database manager: {}", e))?;
+
+        let recovered =
+            SummaryProcessesRepository::recover_interrupted_processes(db_manager.pool())
+                .await
+                .map_err(|e| format!("Failed to recover interrupted summary jobs: {}", e))?;
+        if recovered > 0 {
+            log::warn!("Recovered {} interrupted summary jobs", recovered);
+        }
 
         app.manage(AppState { db_manager });
         info!("Database initialized successfully");

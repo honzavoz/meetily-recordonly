@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
 use super::manager::DatabaseManager;
+use super::repositories::summary::SummaryProcessesRepository;
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -160,6 +161,13 @@ pub async fn import_and_initialize_database(
             format!("Failed to import database: {}", e)
         })?;
 
+    let recovered = SummaryProcessesRepository::recover_interrupted_processes(db_manager.pool())
+        .await
+        .map_err(|e| format!("Failed to recover interrupted summary jobs: {}", e))?;
+    if recovered > 0 {
+        log::warn!("Recovered {} interrupted summary jobs", recovered);
+    }
+
     // Update app state with the new manager
     app.manage(AppState { db_manager });
 
@@ -183,6 +191,13 @@ pub async fn initialize_fresh_database(app: AppHandle) -> Result<(), String> {
             error!("Failed to initialize fresh database: {}", e);
             format!("Failed to initialize database: {}", e)
         })?;
+
+    let recovered = SummaryProcessesRepository::recover_interrupted_processes(db_manager.pool())
+        .await
+        .map_err(|e| format!("Failed to recover interrupted summary jobs: {}", e))?;
+    if recovered > 0 {
+        log::warn!("Recovered {} interrupted summary jobs", recovered);
+    }
 
     // Update app state with the new manager
     app.manage(AppState { db_manager: db_manager.clone() });
