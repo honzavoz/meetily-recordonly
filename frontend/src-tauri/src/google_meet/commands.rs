@@ -64,6 +64,19 @@ fn integration_status(app: &tauri::AppHandle) -> Result<GoogleMeetIntegrationSta
     })
 }
 
+pub fn refresh_installed_integration(app: &tauri::AppHandle) -> Result<(), String> {
+    let (source, destination, preferences_path) = paths(app)?;
+    if !read_preferences(&preferences_path).enabled || !destination.exists() {
+        return Ok(());
+    }
+    if !source.join("manifest.json").exists() {
+        return Err("Bundled Google Meet extension is missing".into());
+    }
+    replace_directory_atomically(&source, &destination).map_err(|error| error.to_string())?;
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    write_host_manifest(&chrome_host_manifest_path()?, &executable)
+}
+
 #[tauri::command]
 pub fn install_google_meet_integration(
     app: tauri::AppHandle,
@@ -126,7 +139,7 @@ pub fn get_google_meet_integration_status(
     integration_status(&app)
 }
 
-pub fn dispatch_event(app: tauri::AppHandle, event: MeetEvent) {
+pub fn dispatch_event(app: tauri::AppHandle, event: MeetEvent, ack_path: Option<PathBuf>) {
     tauri::async_runtime::spawn(async move {
         let recording = crate::is_recording().await;
         if let Ok(mut last_seen_at) = app.state::<GoogleMeetState>().last_seen_at.lock() {
@@ -142,13 +155,22 @@ pub fn dispatch_event(app: tauri::AppHandle, event: MeetEvent) {
                     .accept(event, recording, Utc::now())
                     .map_err(|error| error.to_string())
             });
-        match decision {
-            Ok(decision) => {
-                if let Err(error) = window::apply_decision(&app, decision) {
-                    log::error!("Failed to apply Google Meet reminder: {error}");
-                }
+        let result = match decision {
+            Ok(decision) => window::apply_decision(&app, decision),
+            Err(error) => Err(error),
+        };
+        if let Err(error) = &result {
+            log::warn!("Rejected Google Meet event: {error}");
+        }
+        if let Some(path) = ack_path {
+            let acknowledgement = super::native_host::DeliveryAck {
+                accepted: result.is_ok(),
+                recording,
+                error_code: result.err().map(|_| "event_rejected".to_string()),
+            };
+            if let Err(error) = super::native_host::write_delivery_ack(&path, &acknowledgement) {
+                log::error!("Failed to acknowledge Google Meet event: {error}");
             }
-            Err(error) => log::warn!("Rejected Google Meet event: {error}"),
         }
     });
 }
@@ -201,14 +223,6 @@ pub async fn start_google_meet_recording(
     state: State<'_, GoogleMeetState>,
     session_id: Uuid,
 ) -> Result<(), String> {
-    if !state
-        .coordinator
-        .lock()
-        .map_err(|error| error.to_string())?
-        .has_session(session_id)
-    {
-        return Err("Google Meet session is no longer active".into());
-    }
     if crate::is_recording().await {
         state
             .coordinator
@@ -218,13 +232,27 @@ pub async fn start_google_meet_recording(
             .map_err(|error| error.to_string())?;
         return window::hide(&app);
     }
+    state
+        .coordinator
+        .lock()
+        .map_err(|error| error.to_string())?
+        .begin_recording_start(session_id)
+        .map_err(|error| error.to_string())?;
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| "Meetily main window is unavailable".to_string())?;
     let session_json = serde_json::to_string(&session_id).map_err(|error| error.to_string())?;
-    main.eval(format!(
+    if let Err(error) = main.eval(format!(
         "sessionStorage.setItem('googleMeetStartSession', {session_json});sessionStorage.setItem('autoStartRecording','true');window.location.assign('/');"
-    )).map_err(|error| error.to_string())
+    )) {
+        let _ = state
+            .coordinator
+            .lock()
+            .map_err(|lock_error| lock_error.to_string())?
+            .fail_recording_start(session_id);
+        return Err(error.to_string());
+    }
+    window::hide(&app)
 }
 
 #[tauri::command]
@@ -233,13 +261,13 @@ pub fn complete_google_meet_recording_start(
     state: State<'_, GoogleMeetState>,
     session_id: Uuid,
 ) -> Result<(), String> {
-    state
+    let decision = state
         .coordinator
         .lock()
         .map_err(|error| error.to_string())?
         .mark_recording_started(session_id)
         .map_err(|error| error.to_string())?;
-    window::hide(&app)
+    window::apply_decision(&app, decision)
 }
 
 #[tauri::command]
@@ -249,15 +277,17 @@ pub fn fail_google_meet_recording_start(
     session_id: Uuid,
     message: String,
 ) -> Result<(), String> {
-    if !state
+    let meeting_ended = state
         .coordinator
         .lock()
         .map_err(|error| error.to_string())?
-        .has_session(session_id)
-    {
-        return Err("Google Meet session is no longer active".into());
+        .fail_recording_start(session_id)
+        .map_err(|error| error.to_string())?;
+    if meeting_ended {
+        window::hide(&app)
+    } else {
+        window::show(&app, ReminderPayload::error(session_id, message))
     }
-    window::show(&app, ReminderPayload::error(session_id, message))
 }
 
 #[tauri::command]
@@ -266,13 +296,14 @@ pub async fn stop_google_meet_recording(
     state: State<'_, GoogleMeetState>,
     session_id: Uuid,
 ) -> Result<(), String> {
-    if !state
+    state
         .coordinator
         .lock()
         .map_err(|error| error.to_string())?
-        .has_session(session_id)
-    {
-        return Err("Google Meet session is no longer active".into());
+        .authorize_stop(session_id)
+        .map_err(|error| error.to_string())?;
+    if !crate::is_recording().await {
+        return Err("Recording is no longer active".into());
     }
     crate::tray::stop_recording_and_post_process(app.clone()).await?;
     state

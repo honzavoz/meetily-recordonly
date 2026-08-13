@@ -79,7 +79,7 @@ export interface GoogleMeetIntegrationStatus {
 
 export function integrationStatusLabel(status: GoogleMeetIntegrationStatus): string {
   if (!status.extensionPath) return 'Not installed';
-  if (status.enabled && status.nativeHostRegistered) return 'Connected';
+  if (status.enabled && status.nativeHostRegistered && status.lastSeenAt) return 'Connected';
   return 'Needs attention';
 }
 

@@ -20,6 +20,8 @@ pub enum CoordinatorError {
     UnknownSession,
     #[error("Google Meet event sequence did not increase")]
     NonIncreasingSequence,
+    #[error("Google Meet reminder action is not valid in the current state")]
+    InvalidAction,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +34,7 @@ struct Session {
     prompt_count: u8,
     skipped: bool,
     recording_owned: bool,
+    recording_starting: bool,
     ended: bool,
 }
 
@@ -64,6 +67,7 @@ impl Coordinator {
                 prompt_count: 0,
                 skipped: false,
                 recording_owned: false,
+                recording_starting: false,
                 ended: false,
             });
         } else {
@@ -78,6 +82,9 @@ impl Coordinator {
         let session = self.session.as_mut().expect("session initialized");
         match event.event {
             MeetEventKind::MeetingJoined | MeetEventKind::Heartbeat => {
+                if session.recording_starting {
+                    return Ok(Decision::None);
+                }
                 if recording {
                     session.skipped = true;
                     return Ok(if session.visible_since.take().is_some() {
@@ -104,6 +111,8 @@ impl Coordinator {
                     Ok(Decision::ShowStop {
                         session_id: session.id,
                     })
+                } else if session.recording_starting {
+                    Ok(Decision::Hide)
                 } else {
                     self.session = None;
                     Ok(Decision::Hide)
@@ -122,7 +131,12 @@ impl Coordinator {
             return vec![Decision::Hide];
         }
 
-        if session.ended || session.skipped || session.recording_owned || recording {
+        if session.ended
+            || session.skipped
+            || session.recording_owned
+            || session.recording_starting
+            || recording
+        {
             return Vec::new();
         }
 
@@ -157,16 +171,60 @@ impl Coordinator {
         Ok(())
     }
 
-    pub fn mark_recording_started(&mut self, session_id: Uuid) -> Result<(), CoordinatorError> {
+    pub fn begin_recording_start(&mut self, session_id: Uuid) -> Result<(), CoordinatorError> {
         let session = self.session_mut(session_id)?;
-        session.recording_owned = true;
+        if session.skipped || session.ended || session.recording_owned || session.recording_starting
+        {
+            return Err(CoordinatorError::InvalidAction);
+        }
+        session.recording_starting = true;
         session.visible_since = None;
         Ok(())
     }
 
-    pub fn fail_recording_start(&mut self, session_id: Uuid) -> Result<(), CoordinatorError> {
+    pub fn mark_recording_started(
+        &mut self,
+        session_id: Uuid,
+    ) -> Result<Decision, CoordinatorError> {
         let session = self.session_mut(session_id)?;
+        if !session.recording_starting {
+            return Err(CoordinatorError::InvalidAction);
+        }
+        session.recording_starting = false;
+        session.recording_owned = true;
+        session.visible_since = None;
+        Ok(if session.ended {
+            Decision::ShowStop {
+                session_id: session.id,
+            }
+        } else {
+            Decision::Hide
+        })
+    }
+
+    pub fn fail_recording_start(&mut self, session_id: Uuid) -> Result<bool, CoordinatorError> {
+        let session = self.session_mut(session_id)?;
+        if !session.recording_starting {
+            return Err(CoordinatorError::InvalidAction);
+        }
+        if session.ended {
+            self.session = None;
+            return Ok(true);
+        }
+        session.recording_starting = false;
         session.visible_since = Some(Utc::now());
+        Ok(false)
+    }
+
+    pub fn authorize_stop(&self, session_id: Uuid) -> Result<(), CoordinatorError> {
+        let session = self
+            .session
+            .as_ref()
+            .filter(|session| session.id == session_id)
+            .ok_or(CoordinatorError::UnknownSession)?;
+        if !session.ended || !session.recording_owned || session.recording_starting {
+            return Err(CoordinatorError::InvalidAction);
+        }
         Ok(())
     }
 
@@ -253,6 +311,7 @@ mod tests {
         coordinator
             .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
             .unwrap();
+        coordinator.begin_recording_start(id).unwrap();
         coordinator.mark_recording_started(id).unwrap();
         assert_eq!(
             coordinator.accept(event(id, 2, MeetEventKind::MeetingLeft, 30), true, at(30)),
@@ -284,6 +343,49 @@ mod tests {
             Ok(Decision::Hide),
         );
         assert!(coordinator.tick(false, at(60)).is_empty());
+    }
+
+    #[test]
+    fn start_pending_blocks_duplicates_and_preserves_leave_ownership() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+
+        coordinator.begin_recording_start(id).unwrap();
+        assert_eq!(
+            coordinator.begin_recording_start(id),
+            Err(CoordinatorError::InvalidAction),
+        );
+        assert_eq!(
+            coordinator.accept(event(id, 2, MeetEventKind::MeetingLeft, 2), false, at(2)),
+            Ok(Decision::Hide),
+        );
+        assert!(coordinator.tick(false, at(60)).is_empty());
+        assert_eq!(
+            coordinator.mark_recording_started(id),
+            Ok(Decision::ShowStop { session_id: id }),
+        );
+    }
+
+    #[test]
+    fn stop_is_authorized_only_for_an_ended_owned_recording() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+        assert_eq!(
+            coordinator.authorize_stop(id),
+            Err(CoordinatorError::InvalidAction)
+        );
+        coordinator.begin_recording_start(id).unwrap();
+        coordinator.mark_recording_started(id).unwrap();
+        coordinator
+            .accept(event(id, 2, MeetEventKind::MeetingLeft, 3), true, at(3))
+            .unwrap();
+        assert_eq!(coordinator.authorize_stop(id), Ok(()));
     }
 
     #[test]

@@ -2,7 +2,9 @@ use super::protocol::MeetEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 
@@ -18,6 +20,8 @@ pub enum NativeHostError {
     Protocol(#[from] super::protocol::ProtocolError),
     #[error("failed to launch Meetily: {0}")]
     Launch(String),
+    #[error("Meetily did not acknowledge the event in time")]
+    DeliveryTimeout,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +54,14 @@ impl NativeHostResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryAck {
+    pub accepted: bool,
+    pub recording: bool,
+    pub error_code: Option<String>,
+}
+
 pub fn read_message(reader: &mut impl Read) -> Result<MeetEvent, NativeHostError> {
     let mut length_bytes = [0_u8; 4];
     reader.read_exact(&mut length_bytes)?;
@@ -74,29 +86,69 @@ pub fn write_message(
     Ok(())
 }
 
-fn deliver(event: &MeetEvent) -> Result<(), NativeHostError> {
+fn ack_path() -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "meetily-google-meet-ack-{}.json",
+        uuid::Uuid::new_v4()
+    ))
+}
+
+fn deliver(event: &MeetEvent) -> Result<NativeHostResponse, NativeHostError> {
     let executable = std::env::current_exe()?;
     let payload = serde_json::to_string(event)?;
+    let acknowledgement = ack_path();
     Command::new(executable)
         .arg("--google-meet-event")
         .arg(payload)
+        .arg("--google-meet-ack")
+        .arg(&acknowledgement)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| NativeHostError::Launch(error.to_string()))?;
-    Ok(())
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if let Ok(data) = std::fs::read(&acknowledgement) {
+            let _ = std::fs::remove_file(&acknowledgement);
+            let ack: DeliveryAck = serde_json::from_slice(&data)?;
+            return Ok(NativeHostResponse {
+                accepted: ack.accepted,
+                recording: ack.recording,
+                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                error_code: ack.error_code,
+            });
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(NativeHostError::DeliveryTimeout)
+}
+
+pub fn write_delivery_ack(path: &Path, ack: &DeliveryAck) -> Result<(), String> {
+    let validated = super::protocol::parse_google_meet_ack_arg(&[
+        "Meetily".into(),
+        "--google-meet-ack".into(),
+        path.to_string_lossy().into_owned(),
+    ])
+    .map_err(|error| error.to_string())?;
+    if validated.as_deref() != Some(path) {
+        return Err("Invalid Google Meet delivery acknowledgement path".into());
+    }
+    let staging = path.with_extension("json.staging");
+    std::fs::write(
+        &staging,
+        serde_json::to_vec(ack).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
+    std::fs::rename(staging, path).map_err(|error| error.to_string())
 }
 
 pub fn run_stdio() -> i32 {
     let result = (|| -> Result<NativeHostResponse, NativeHostError> {
         let event = read_message(&mut std::io::stdin().lock())?;
         event.validate(Utc::now())?;
-        deliver(&event)?;
-        Ok(NativeHostResponse::accepted(
-            false,
-            env!("CARGO_PKG_VERSION"),
-        ))
+        deliver(&event)
     })();
 
     let (response, exit_code) = match result {

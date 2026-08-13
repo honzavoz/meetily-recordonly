@@ -570,7 +570,14 @@ pub fn run() {
             );
 
             match google_meet::protocol::parse_google_meet_event_arg(&args) {
-                Ok(Some(event)) => google_meet::commands::dispatch_event(app.clone(), event),
+                Ok(Some(event)) => {
+                    let ack_path = google_meet::protocol::parse_google_meet_ack_arg(&args)
+                        .unwrap_or_else(|error| {
+                            log::warn!("Rejected Google Meet acknowledgement path: {error}");
+                            None
+                        });
+                    google_meet::commands::dispatch_event(app.clone(), event, ack_path)
+                }
                 Ok(None) => tray::focus_main_window(app),
                 Err(error) => log::warn!("Rejected Google Meet launch event: {error}"),
             }
@@ -602,14 +609,30 @@ pub fn run() {
                     None
                 }
             };
+            let initial_meet_ack = google_meet::protocol::parse_google_meet_ack_arg(
+                &std::env::args().collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|error| {
+                log::warn!("Rejected initial Google Meet acknowledgement path: {error}");
+                None
+            });
             if initial_meet_event.is_some() {
                 if let Some(main_window) = _app.get_webview_window("main") {
                     let _ = main_window.hide();
                 }
             }
             google_meet::commands::start_coordinator_timer(_app.handle().clone());
+            if let Err(error) =
+                google_meet::commands::refresh_installed_integration(_app.handle())
+            {
+                log::warn!("Failed to refresh Google Meet integration: {error}");
+            }
             if let Some(event) = initial_meet_event {
-                google_meet::commands::dispatch_event(_app.handle().clone(), event);
+                google_meet::commands::dispatch_event(
+                    _app.handle().clone(),
+                    event,
+                    initial_meet_ack,
+                );
             }
 
             // Initialize system tray

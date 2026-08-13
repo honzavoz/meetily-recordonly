@@ -17,9 +17,16 @@ export function GoogleMeetReminderSettings() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    invoke<GoogleMeetIntegrationStatus>('get_google_meet_integration_status')
-      .then(setStatus)
-      .catch((reason) => setError(normalizeReminderError(reason)));
+    let disposed = false;
+    const refresh = () => invoke<GoogleMeetIntegrationStatus>('get_google_meet_integration_status')
+      .then((next) => { if (!disposed) setStatus(next); })
+      .catch((reason) => { if (!disposed) setError(normalizeReminderError(reason)); });
+    refresh();
+    const interval = window.setInterval(refresh, 5_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
   }, []);
 
   const install = async () => {
