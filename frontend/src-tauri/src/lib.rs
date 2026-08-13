@@ -36,18 +36,18 @@ pub(crate) use perf_trace;
 
 // Declare audio module
 pub mod analytics;
+pub mod anthropic;
 pub mod api;
 pub mod audio;
 pub mod config;
 pub mod console_utils;
 pub mod database;
+pub mod google_meet;
+pub mod groq;
 pub mod notifications;
 pub mod ollama;
 pub mod onboarding;
 pub mod openai;
-pub mod anthropic;
-pub mod groq;
-pub mod google_meet;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
@@ -56,7 +56,7 @@ pub mod tray;
 pub mod utils;
 pub mod whisper_engine;
 
-use audio::{list_audio_devices, AudioDevice, trigger_audio_permission};
+use audio::{list_audio_devices, trigger_audio_permission, AudioDevice};
 use log::{error as log_error, info as log_info};
 use notifications::commands::NotificationManagerState;
 use std::sync::Arc;
@@ -64,10 +64,32 @@ use tauri::{AppHandle, Manager, Runtime};
 use tokio::sync::RwLock;
 
 static RECORDING_FLAG: AtomicBool = AtomicBool::new(false);
+static RECORDING_START_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 static MAIN_WINDOW_HIDE_REQUEST: AtomicU64 = AtomicU64::new(0);
 static NEXT_MAIN_WINDOW_HIDE_REQUEST: AtomicU64 = AtomicU64::new(1);
 
 const FULLSCREEN_EXIT_CHECK_INTERVAL_MS: u64 = 25;
+
+struct RecordingStartGuard;
+
+impl RecordingStartGuard {
+    fn acquire() -> Result<Self, String> {
+        RECORDING_START_IN_PROGRESS
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .map(|_| Self)
+            .map_err(|_| "Recording start is already in progress".to_string())
+    }
+}
+
+impl Drop for RecordingStartGuard {
+    fn drop(&mut self) {
+        RECORDING_START_IN_PROGRESS.store(false, Ordering::SeqCst);
+    }
+}
+
+pub(crate) fn is_recording_starting() -> bool {
+    RECORDING_START_IN_PROGRESS.load(Ordering::SeqCst)
+}
 const FULLSCREEN_EXIT_MAX_CHECKS: usize = 200;
 
 pub(crate) fn cancel_pending_main_window_hide() {
@@ -219,10 +241,7 @@ async fn handle_main_window_close<R: Runtime>(window: tauri::Window<R>, request_
     if native_fullscreen || cached_fullscreen {
         if let Err(e) = window.set_fullscreen(false) {
             finish_main_window_hide(request_id);
-            log::error!(
-                "Failed to exit fullscreen before hiding main window: {}",
-                e
-            );
+            log::error!("Failed to exit fullscreen before hiding main window: {}", e);
             return;
         }
 
@@ -255,6 +274,7 @@ async fn start_recording<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
+    let _start_guard = RecordingStartGuard::acquire()?;
     log_info!("🔥 CALLED start_recording with meeting: {:?}", meeting_name);
     log_info!(
         "📋 Backend received parameters - mic: {:?}, system: {:?}, meeting: {:?}",
@@ -292,10 +312,7 @@ async fn start_recording<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             } else {
                 log_info!("Successfully showed recording started notification");
             }
@@ -353,10 +370,7 @@ async fn stop_recording<R: Runtime>(app: AppHandle<R>, args: RecordingArgs) -> R
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording stopped notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording stopped notification: {}", e);
             } else {
                 log_info!("Successfully showed recording stopped notification");
             }
@@ -478,6 +492,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
     system_device_name: Option<String>,
     meeting_name: Option<String>,
 ) -> Result<(), String> {
+    let _start_guard = RecordingStartGuard::acquire()?;
     log_info!("🚀 CALLED start_recording_with_devices_and_meeting - Mic: {:?}, System: {:?}, Meeting: {:?}",
              mic_device_name, system_device_name, meeting_name);
 
@@ -525,10 +540,7 @@ async fn start_recording_with_devices_and_meeting<R: Runtime>(
             )
             .await
             {
-                log_error!(
-                    "Failed to show recording started notification: {}",
-                    e
-                );
+                log_error!("Failed to show recording started notification: {}", e);
             }
 
             Ok(())
@@ -596,7 +608,9 @@ pub fn run() {
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
         .manage(google_meet::GoogleMeetState::default())
-        .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
+        .manage(summary::summary_engine::ModelManagerState(Arc::new(
+            tokio::sync::Mutex::new(None),
+        )))
         .setup(|_app| {
             log::info!("Application setup complete");
 
@@ -622,8 +636,7 @@ pub fn run() {
                 }
             }
             google_meet::commands::start_coordinator_timer(_app.handle().clone());
-            if let Err(error) =
-                google_meet::commands::refresh_installed_integration(_app.handle())
+            if let Err(error) = google_meet::commands::refresh_installed_integration(_app.handle())
             {
                 log::warn!("Failed to refresh Google Meet integration: {error}");
             }
@@ -645,7 +658,11 @@ pub fn run() {
             let app_for_notif = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let notif_state = app_for_notif.state::<NotificationManagerState<tauri::Wry>>();
-                match notifications::commands::initialize_notification_manager(app_for_notif.clone()).await {
+                match notifications::commands::initialize_notification_manager(
+                    app_for_notif.clone(),
+                )
+                .await
+                {
                     Ok(manager) => {
                         // Set default consent and permissions on first launch
                         if let Err(e) = manager.set_consent(true).await {
@@ -689,7 +706,11 @@ pub fn run() {
             // Initialize ModelManager for summary engine (async, non-blocking)
             let app_handle_for_model_manager = _app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                match summary::summary_engine::commands::init_model_manager_at_startup(&app_handle_for_model_manager).await {
+                match summary::summary_engine::commands::init_model_manager_at_startup(
+                    &app_handle_for_model_manager,
+                )
+                .await
+                {
                     Ok(_) => log::info!("ModelManager initialized successfully at startup"),
                     Err(e) => {
                         log::warn!("Failed to initialize ModelManager at startup: {}", e);
@@ -718,7 +739,10 @@ pub fn run() {
             log::info!("Initializing bundled templates directory...");
             if let Ok(resource_path) = _app.handle().path().resource_dir() {
                 let templates_dir = resource_path.join("templates");
-                log::info!("Setting bundled templates directory to: {:?}", templates_dir);
+                log::info!(
+                    "Setting bundled templates directory to: {:?}",
+                    templates_dir
+                );
                 summary::templates::set_bundled_templates_dir(templates_dir);
             } else {
                 log::warn!("Failed to resolve resource directory for templates");
@@ -1019,7 +1043,9 @@ pub fn run() {
                                 log::info!("Database cleanup completed successfully");
                             }
                         } else {
-                            log::warn!("AppState not available for database cleanup (likely first launch)");
+                            log::warn!(
+                                "AppState not available for database cleanup (likely first launch)"
+                            );
                         }
 
                         // Clean up sidecar

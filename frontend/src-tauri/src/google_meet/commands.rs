@@ -187,8 +187,11 @@ pub fn start_coordinator_timer(app: tauri::AppHandle) {
         loop {
             interval.tick().await;
             let recording = crate::is_recording().await;
+            let backend_starting = crate::is_recording_starting();
             let decisions = match app.state::<GoogleMeetState>().coordinator.lock() {
-                Ok(mut coordinator) => coordinator.tick(recording, Utc::now()),
+                Ok(mut coordinator) => {
+                    coordinator.tick_with_backend_start(recording, backend_starting, Utc::now())
+                }
                 Err(error) => {
                     log::error!("Google Meet coordinator lock failed: {error}");
                     continue;

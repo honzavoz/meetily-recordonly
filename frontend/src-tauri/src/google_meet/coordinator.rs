@@ -126,6 +126,15 @@ impl Coordinator {
     }
 
     pub fn tick(&mut self, recording: bool, now: DateTime<Utc>) -> Vec<Decision> {
+        self.tick_with_backend_start(recording, false, now)
+    }
+
+    pub fn tick_with_backend_start(
+        &mut self,
+        recording: bool,
+        backend_starting: bool,
+        now: DateTime<Utc>,
+    ) -> Vec<Decision> {
         let Some(session) = self.session.as_mut() else {
             return Vec::new();
         };
@@ -148,10 +157,14 @@ impl Coordinator {
                     Decision::Hide
                 }];
             }
-            if session.recording_starting_since.is_some_and(|started| {
-                now - started >= Duration::seconds(RECORDING_START_TIMEOUT_SECONDS)
-            }) && session.visible_since.is_none()
+            if !backend_starting
+                && session.recording_starting_since.is_some_and(|started| {
+                    now - started >= Duration::seconds(RECORDING_START_TIMEOUT_SECONDS)
+                })
+                && session.visible_since.is_none()
             {
+                session.recording_starting = false;
+                session.recording_starting_since = None;
                 if session.ended {
                     self.session = None;
                     return vec![Decision::Hide];
@@ -429,17 +442,17 @@ mod tests {
 
         assert!(coordinator.tick(false, at(15)).is_empty());
         assert_eq!(
-            coordinator.tick(false, at(16)),
+            coordinator.tick_with_backend_start(false, true, at(16)),
+            vec![]
+        );
+        assert_eq!(
+            coordinator.tick_with_backend_start(false, false, at(17)),
             vec![Decision::ShowStart {
                 session_id: id,
                 attempt: 1
             }]
         );
-        assert_eq!(
-            coordinator.begin_recording_start_at(id, at(17)),
-            Err(CoordinatorError::InvalidAction)
-        );
-        assert_eq!(coordinator.mark_recording_started(id), Ok(Decision::Hide));
+        assert_eq!(coordinator.begin_recording_start_at(id, at(18)), Ok(()));
     }
 
     #[test]
@@ -455,6 +468,27 @@ mod tests {
         assert_eq!(
             coordinator.accept(event(id, 2, MeetEventKind::MeetingLeft, 3), true, at(3)),
             Ok(Decision::ShowStop { session_id: id })
+        );
+    }
+
+    #[test]
+    fn ended_session_waits_for_a_slow_backend_start_before_recovery() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+        coordinator.begin_recording_start_at(id, at(1)).unwrap();
+        coordinator
+            .accept(event(id, 2, MeetEventKind::MeetingLeft, 2), false, at(2))
+            .unwrap();
+
+        assert!(coordinator
+            .tick_with_backend_start(false, true, at(20))
+            .is_empty());
+        assert_eq!(
+            coordinator.tick_with_backend_start(true, false, at(21)),
+            vec![Decision::ShowStop { session_id: id }]
         );
     }
 
