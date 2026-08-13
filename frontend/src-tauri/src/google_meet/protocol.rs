@@ -13,6 +13,7 @@ pub fn is_native_host_invocation(args: &[String]) -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetEventKind {
+    IntegrationPing,
     MeetingJoined,
     MeetingLeft,
     Heartbeat,
@@ -107,6 +108,14 @@ mod tests {
             event.validate(Utc.with_ymd_and_hms(2026, 8, 13, 12, 5, 0).unwrap()),
             Ok(())
         );
+    }
+
+    #[test]
+    fn accepts_an_integration_ping() {
+        let ping = VALID.replace("meeting_joined", "integration_ping");
+        let event: MeetEvent = serde_json::from_str(&ping).unwrap();
+        assert_eq!(event.event, MeetEventKind::IntegrationPing);
+        assert_eq!(event.validate(event.occurred_at), Ok(()));
     }
 
     #[test]

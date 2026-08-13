@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 const PROMPT_VISIBLE_SECONDS: i64 = 20;
 const SECOND_PROMPT_AFTER_SECONDS: i64 = 50;
+const RECORDING_START_TIMEOUT_SECONDS: i64 = 15;
 const SESSION_EXPIRY_HOURS: i64 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,6 +36,7 @@ struct Session {
     skipped: bool,
     recording_owned: bool,
     recording_starting: bool,
+    recording_starting_since: Option<DateTime<Utc>>,
     ended: bool,
 }
 
@@ -68,6 +70,7 @@ impl Coordinator {
                 skipped: false,
                 recording_owned: false,
                 recording_starting: false,
+                recording_starting_since: None,
                 ended: false,
             });
         } else {
@@ -81,6 +84,7 @@ impl Coordinator {
 
         let session = self.session.as_mut().expect("session initialized");
         match event.event {
+            MeetEventKind::IntegrationPing => Ok(Decision::None),
             MeetEventKind::MeetingJoined | MeetEventKind::Heartbeat => {
                 if session.recording_starting {
                     return Ok(Decision::None);
@@ -131,12 +135,46 @@ impl Coordinator {
             return vec![Decision::Hide];
         }
 
-        if session.ended
-            || session.skipped
-            || session.recording_owned
-            || session.recording_starting
-            || recording
-        {
+        if session.recording_starting {
+            if recording {
+                session.recording_starting = false;
+                session.recording_starting_since = None;
+                session.recording_owned = true;
+                return vec![if session.ended {
+                    Decision::ShowStop {
+                        session_id: session.id,
+                    }
+                } else {
+                    Decision::Hide
+                }];
+            }
+            if session.recording_starting_since.is_some_and(|started| {
+                now - started >= Duration::seconds(RECORDING_START_TIMEOUT_SECONDS)
+            }) && session.visible_since.is_none()
+            {
+                if session.ended {
+                    self.session = None;
+                    return vec![Decision::Hide];
+                }
+                session.visible_since = Some(now);
+                return vec![Decision::ShowStart {
+                    session_id: session.id,
+                    attempt: session.prompt_count.max(1),
+                }];
+            }
+            return Vec::new();
+        }
+
+        if recording {
+            session.skipped = true;
+            return if session.visible_since.take().is_some() {
+                vec![Decision::Hide]
+            } else {
+                Vec::new()
+            };
+        }
+
+        if session.ended || session.skipped || session.recording_owned {
             return Vec::new();
         }
 
@@ -172,12 +210,21 @@ impl Coordinator {
     }
 
     pub fn begin_recording_start(&mut self, session_id: Uuid) -> Result<(), CoordinatorError> {
+        self.begin_recording_start_at(session_id, Utc::now())
+    }
+
+    fn begin_recording_start_at(
+        &mut self,
+        session_id: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<(), CoordinatorError> {
         let session = self.session_mut(session_id)?;
         if session.skipped || session.ended || session.recording_owned || session.recording_starting
         {
             return Err(CoordinatorError::InvalidAction);
         }
         session.recording_starting = true;
+        session.recording_starting_since = Some(now);
         session.visible_since = None;
         Ok(())
     }
@@ -191,6 +238,7 @@ impl Coordinator {
             return Err(CoordinatorError::InvalidAction);
         }
         session.recording_starting = false;
+        session.recording_starting_since = None;
         session.recording_owned = true;
         session.visible_since = None;
         Ok(if session.ended {
@@ -212,6 +260,7 @@ impl Coordinator {
             return Ok(true);
         }
         session.recording_starting = false;
+        session.recording_starting_since = None;
         session.visible_since = Some(Utc::now());
         Ok(false)
     }
@@ -367,6 +416,66 @@ mod tests {
             coordinator.mark_recording_started(id),
             Ok(Decision::ShowStop { session_id: id }),
         );
+    }
+
+    #[test]
+    fn pending_start_recovers_from_a_missing_frontend_callback() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+        coordinator.begin_recording_start_at(id, at(1)).unwrap();
+
+        assert!(coordinator.tick(false, at(15)).is_empty());
+        assert_eq!(
+            coordinator.tick(false, at(16)),
+            vec![Decision::ShowStart {
+                session_id: id,
+                attempt: 1
+            }]
+        );
+        assert_eq!(
+            coordinator.begin_recording_start_at(id, at(17)),
+            Err(CoordinatorError::InvalidAction)
+        );
+        assert_eq!(coordinator.mark_recording_started(id), Ok(Decision::Hide));
+    }
+
+    #[test]
+    fn pending_start_is_recovered_when_recording_really_started() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+        coordinator.begin_recording_start_at(id, at(1)).unwrap();
+
+        assert_eq!(coordinator.tick(true, at(2)), vec![Decision::Hide]);
+        assert_eq!(
+            coordinator.accept(event(id, 2, MeetEventKind::MeetingLeft, 3), true, at(3)),
+            Ok(Decision::ShowStop { session_id: id })
+        );
+    }
+
+    #[test]
+    fn a_late_manual_recording_hides_a_recovered_prompt() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+        coordinator.begin_recording_start_at(id, at(1)).unwrap();
+        assert_eq!(
+            coordinator.tick(false, at(16)),
+            vec![Decision::ShowStart {
+                session_id: id,
+                attempt: 1
+            }]
+        );
+
+        assert_eq!(coordinator.tick(true, at(17)), vec![Decision::Hide]);
+        assert!(coordinator.tick(false, at(60)).is_empty());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-import { NATIVE_HOST } from './protocol.js';
+import { createIntegrationPing, NATIVE_HOST } from './protocol.js';
 
 const SESSION_KEY_PREFIX = 'meetilyMeetSession:';
 
@@ -25,7 +25,21 @@ export async function sendToNative(sendNativeMessage, payload) {
   throw lastError;
 }
 
+export async function performHandshake(sendNativeMessage, extensionVersion) {
+  return sendToNative(sendNativeMessage, createIntegrationPing(extensionVersion));
+}
+
 if (typeof chrome !== 'undefined') {
+  const handshake = () => performHandshake(
+    chrome.runtime.sendNativeMessage.bind(chrome.runtime),
+    chrome.runtime.getManifest().version,
+  ).then((response) => chrome.action.setBadgeText({ text: response.accepted ? '' : '!' }))
+    .catch(() => chrome.action.setBadgeText({ text: '!' }));
+
+  chrome.runtime.onInstalled.addListener(handshake);
+  chrome.runtime.onStartup.addListener(handshake);
+  void handshake();
+
   chrome.runtime.onMessage.addListener((payload, sender, sendResponse) => {
     const sessionKey = sender.tab?.id === undefined
       ? null

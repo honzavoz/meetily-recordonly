@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { createTabClosedEvent, sendToNative } from '../src/service-worker.js';
+import { createTabClosedEvent, performHandshake, sendToNative } from '../src/service-worker.js';
 
 test('returns the accepted native response without retrying', async () => {
   const calls: unknown[] = [];
@@ -52,4 +52,15 @@ test('turns the last tab heartbeat into a sequenced leave event', () => {
     sequence: 5,
     occurredAt: '2026-08-13T12:05:00.000Z',
   });
+});
+
+test('handshake sends a valid integration ping to the native host', async () => {
+  const response = await performHandshake(async (_host, payload) => {
+    expect(payload.event).toBe('integration_ping');
+    expect(payload.sequence).toBe(1);
+    expect(payload.extensionVersion).toBe('0.1.0');
+    return { accepted: true };
+  }, '0.1.0');
+
+  expect(response.accepted).toBe(true);
 });

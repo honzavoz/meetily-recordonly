@@ -142,23 +142,29 @@ pub fn get_google_meet_integration_status(
 pub fn dispatch_event(app: tauri::AppHandle, event: MeetEvent, ack_path: Option<PathBuf>) {
     tauri::async_runtime::spawn(async move {
         let recording = crate::is_recording().await;
-        if let Ok(mut last_seen_at) = app.state::<GoogleMeetState>().last_seen_at.lock() {
-            *last_seen_at = Some(Utc::now());
-        }
-        let decision = app
-            .state::<GoogleMeetState>()
-            .coordinator
-            .lock()
-            .map_err(|error| error.to_string())
-            .and_then(|mut coordinator| {
-                coordinator
-                    .accept(event, recording, Utc::now())
-                    .map_err(|error| error.to_string())
-            });
+        let is_ping = event.event == super::protocol::MeetEventKind::IntegrationPing;
+        let decision = if is_ping {
+            Ok(super::coordinator::Decision::None)
+        } else {
+            app.state::<GoogleMeetState>()
+                .coordinator
+                .lock()
+                .map_err(|error| error.to_string())
+                .and_then(|mut coordinator| {
+                    coordinator
+                        .accept(event, recording, Utc::now())
+                        .map_err(|error| error.to_string())
+                })
+        };
         let result = match decision {
             Ok(decision) => window::apply_decision(&app, decision),
             Err(error) => Err(error),
         };
+        if result.is_ok() {
+            if let Ok(mut last_seen_at) = app.state::<GoogleMeetState>().last_seen_at.lock() {
+                *last_seen_at = Some(Utc::now());
+            }
+        }
         if let Err(error) = &result {
             log::warn!("Rejected Google Meet event: {error}");
         }

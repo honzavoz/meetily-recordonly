@@ -2,10 +2,21 @@ export const PROTOCOL_VERSION = 1;
 export const NATIVE_HOST = 'cz.honzavoz.meetily.recordonly.google_meet';
 
 export const MeetEvent = Object.freeze({
+  IntegrationPing: 'integration_ping',
   Joined: 'meeting_joined',
   Left: 'meeting_left',
   Heartbeat: 'heartbeat',
 });
+
+export function createIntegrationPing(extensionVersion, occurredAt = new Date()) {
+  return createMeetEvent(
+    MeetEvent.IntegrationPing,
+    crypto.randomUUID(),
+    1,
+    extensionVersion,
+    occurredAt,
+  );
+}
 
 export function createMeetEvent(
   event,
