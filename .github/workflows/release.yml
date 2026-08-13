@@ -35,6 +35,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Verify Chrome reminder extension
+        run: |
+          bun test chrome-extension/tests
+          bun scripts/build-chrome-extension.ts
+          node scripts/verify-chrome-extension.js chrome-extension/dist
+
       - name: Validate version consistency
         run: ./scripts/check-version-consistency.sh
 

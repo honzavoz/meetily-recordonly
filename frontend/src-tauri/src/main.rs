@@ -3,10 +3,15 @@
     windows_subsystem = "windows"
 )]
 
-use log;
 use env_logger;
+use log;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if app_lib::google_meet::protocol::is_native_host_invocation(&args) {
+        std::process::exit(app_lib::google_meet::native_host::run_stdio());
+    }
+
     std::env::set_var("RUST_LOG", "info");
     env_logger::init();
 

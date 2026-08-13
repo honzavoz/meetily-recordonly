@@ -60,4 +60,10 @@ new MutationObserver(() => reconcile()).observe(document.documentElement, {
 
 setInterval(reconcile, RECONCILE_MS);
 setInterval(() => emit(MeetEvent.Heartbeat), HEARTBEAT_MS);
+window.addEventListener('pagehide', () => {
+  if (sessionId) {
+    emit(MeetEvent.Left);
+    sessionId = null;
+  }
+});
 reconcile();

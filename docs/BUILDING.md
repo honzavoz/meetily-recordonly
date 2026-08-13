@@ -2,6 +2,37 @@
 
 This guide provides detailed instructions for building Meetily from source on different operating systems.
 
+## Google Meet reminder pilot on macOS
+
+Meetily includes a privacy-limited Chrome extension that detects only whether a Google Meet call has started or ended. It does not read or send participant names, meeting titles, chat, captions, audio, video, the meeting URL, or its meeting code.
+
+One-time setup:
+
+1. Install and open the current Meetily application.
+2. Open **Settings → General → Google Meet reminder** and select **Set up Chrome extension**.
+3. Meetily opens `chrome://extensions` and reveals the extension folder in Finder.
+4. Enable **Developer mode**, select **Load unpacked**, and choose the revealed folder.
+5. Return to Meetily. The status should be **Connected**; use **Test reminder** to verify the reminder window without starting a recording.
+
+The pilot uses a fixed extension identity. Chrome communicates with Meetily through the native-host manifest at:
+
+```text
+~/Library/Application Support/Google/Chrome/NativeMessagingHosts/cz.honzavoz.meetily.recordonly.google_meet.json
+```
+
+Disabling the integration removes only a manifest owned by the current Meetily installation. It keeps the unpacked extension directory so the integration can be enabled again without reloading it in Chrome. To uninstall completely, disable the integration in Meetily and remove the extension on `chrome://extensions`.
+
+Real-call acceptance test:
+
+1. Keep Meetily running in the menu bar, with no recording active.
+2. Join a disposable Google Meet call in Chrome and wait three seconds.
+3. Confirm one reminder appears and **Start recording** begins a single Meetily recording.
+4. Keep the call open for at least one minute and confirm no duplicate reminder appears.
+5. Leave the call and confirm **Stop and save** or **Keep recording** appears only for a recording started by this reminder.
+6. Stop and save, then verify the recording is playable and existing meetings are unchanged.
+
+An exclamation badge on the extension means its native connection needs attention. Re-enable the integration from Meetily settings, then reload the extension if the badge remains.
+
 <details>
 <summary>Linux</summary>
 

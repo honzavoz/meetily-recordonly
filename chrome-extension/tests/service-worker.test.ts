@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { sendToNative } from '../src/service-worker.js';
+import { createTabClosedEvent, sendToNative } from '../src/service-worker.js';
 
 test('returns the accepted native response without retrying', async () => {
   const calls: unknown[] = [];
@@ -33,4 +33,23 @@ test('does not retry a response rejected by Meetily', async () => {
 
   expect(response.accepted).toBe(false);
   expect(calls).toBe(1);
+});
+
+test('turns the last tab heartbeat into a sequenced leave event', () => {
+  const occurredAt = new Date('2026-08-13T12:05:00Z');
+  expect(createTabClosedEvent({
+    protocolVersion: 1,
+    extensionVersion: '0.1.0',
+    event: 'heartbeat',
+    sessionId: '550e8400-e29b-41d4-a716-446655440000',
+    sequence: 4,
+    occurredAt: '2026-08-13T12:04:00Z',
+  }, occurredAt)).toEqual({
+    protocolVersion: 1,
+    extensionVersion: '0.1.0',
+    event: 'meeting_left',
+    sessionId: '550e8400-e29b-41d4-a716-446655440000',
+    sequence: 5,
+    occurredAt: '2026-08-13T12:05:00.000Z',
+  });
 });

@@ -11,6 +11,7 @@ import "sonner/dist/styles.css"
 import { useState, useEffect, useCallback } from 'react'
 import { listen, UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import { usePathname } from 'next/navigation'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { RecordingStateProvider } from '@/contexts/RecordingStateContext'
 import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
@@ -28,6 +29,7 @@ import { isAudioExtension, getAudioFormatsDisplayList } from '@/constants/audioF
 import type { TranscribeLaterRecording } from '@/lib/transcribe-later'
 import type { ImportResult } from '@/hooks/useImportAudio'
 import { getTranscribeLaterTitle } from '@/lib/transcribe-later'
+import { isGoogleMeetReminderRoute } from '@/lib/google-meet-reminder'
 import { transcribeLaterService } from '@/services/transcribeLaterService'
 import {
   OPEN_TRANSCRIBE_LATER_IMPORT_EVENT,
@@ -79,6 +81,24 @@ function ConditionalImportDialog({
 // export { metadata } from './metadata'
 
 export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  const pathname = usePathname()
+
+  if (isGoogleMeetReminderRoute(pathname)) {
+    return (
+      <html lang="en">
+        <body className={`${sourceSans3.variable} font-sans antialiased`}>{children}</body>
+      </html>
+    )
+  }
+
+  return <MainApplicationLayout>{children}</MainApplicationLayout>
+}
+
+function MainApplicationLayout({
   children,
 }: {
   children: React.ReactNode

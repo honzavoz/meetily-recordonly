@@ -9,6 +9,7 @@ import Analytics from '@/lib/analytics';
 import { showRecordingNotification } from '@/lib/recordingNotification';
 import { toast } from 'sonner';
 import { getLiveTranscriptionEnabled } from '@/lib/recording-mode';
+import { consumeGoogleMeetStart, normalizeReminderError } from '@/lib/google-meet-reminder';
 
 interface UseRecordingStartReturn {
   handleRecordingStart: () => Promise<void>;
@@ -167,6 +168,7 @@ export function useRecordingStart(
       if (typeof window !== 'undefined') {
         const shouldAutoStart = sessionStorage.getItem('autoStartRecording');
         if (shouldAutoStart === 'true' && !isRecording && !isAutoStarting) {
+          const googleMeetSession = consumeGoogleMeetStart(sessionStorage);
           console.log('Auto-starting recording from navigation...');
           setIsAutoStarting(true);
           sessionStorage.removeItem('autoStartRecording'); // Clear the flag
@@ -176,6 +178,9 @@ export function useRecordingStart(
           // Check if Parakeet transcription model is ready before starting live transcription.
           if (liveTranscriptionEnabled && !(await checkParakeetReady())) {
             const isDownloading = await checkIfModelDownloading();
+            const failureMessage = isDownloading
+              ? 'The transcription model is still downloading.'
+              : 'A transcription model must be installed before recording.';
             if (isDownloading) {
               toast.info('Model download in progress', {
                 description: 'Please wait for the transcription model to finish downloading before recording.',
@@ -191,6 +196,12 @@ export function useRecordingStart(
               Analytics.trackButtonClick('start_recording_blocked_missing', 'sidebar_auto');
             }
             setStatus(RecordingStatus.IDLE);
+            if (googleMeetSession) {
+              await invoke('fail_google_meet_recording_start', {
+                sessionId: googleMeetSession,
+                message: failureMessage,
+              }).catch((error) => console.error('Failed to report Google Meet start failure:', error));
+            }
             setIsAutoStarting(false);
             return;
           }
@@ -223,10 +234,27 @@ export function useRecordingStart(
             );
 
             // Show recording notification if enabled
-            await showRecordingNotification();
+            try {
+              await showRecordingNotification();
+            } catch (notificationError) {
+              console.error('Failed to show recording notification:', notificationError);
+            }
+
+            if (googleMeetSession) {
+              await invoke('complete_google_meet_recording_start', {
+                sessionId: googleMeetSession,
+              });
+            }
           } catch (error) {
             console.error('Failed to auto-start recording:', error);
-            setStatus(RecordingStatus.ERROR, error instanceof Error ? error.message : 'Failed to auto-start recording');
+            const message = normalizeReminderError(error);
+            setStatus(RecordingStatus.ERROR, message);
+            if (googleMeetSession) {
+              await invoke('fail_google_meet_recording_start', {
+                sessionId: googleMeetSession,
+                message,
+              }).catch((reportError) => console.error('Failed to report Google Meet start failure:', reportError));
+            }
             alert('Failed to start recording. Check console for details.');
             Analytics.trackButtonClick('start_recording_error', 'sidebar_auto');
           } finally {

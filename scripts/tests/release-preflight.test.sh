@@ -156,6 +156,14 @@ pass_count=$((pass_count + 1))
 
 macos_workflow="$repo_root/.github/workflows/build-macos.yml"
 release_workflow="$repo_root/.github/workflows/release.yml"
+grep -Fq 'bun test chrome-extension/tests' "$release_workflow" || fail "release does not run Chrome extension tests"
+grep -Fq 'bun scripts/build-chrome-extension.ts' "$release_workflow" || fail "release does not build the Chrome extension"
+grep -Fq 'node scripts/verify-chrome-extension.js chrome-extension/dist' "$release_workflow" || fail "release does not verify the Chrome extension package"
+extension_check_line="$(grep -n 'Verify Chrome reminder extension' "$release_workflow" | head -1 | cut -d: -f1)"
+draft_release_line="$(grep -n 'Find or Create Draft Release' "$release_workflow" | head -1 | cut -d: -f1)"
+[[ -n "$extension_check_line" && -n "$draft_release_line" && "$extension_check_line" -lt "$draft_release_line" ]] \
+  || fail "Chrome extension verification must run before draft release creation"
+pass_count=$((pass_count + 1))
 grep -A5 'sign-build:' "$macos_workflow" | grep -q 'default: false' || fail "macOS sign-build must default to false"
 grep -q 'Validate Apple signing credentials' "$macos_workflow" || fail "macOS signing preflight step is missing"
 grep -q 'signed-notarized' "$macos_workflow" || fail "signed artifact label is missing"

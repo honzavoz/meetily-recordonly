@@ -1,13 +1,13 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "Meetily",
-    "version": "0.4.13",
+    "version": "0.4.14",
     "identifier": "cz.honzavoz.meetily.recordonly",
     "build": {
         "frontendDist": "../out",
         "devUrl": "http://localhost:3118",
         "beforeDevCommand": "pnpm dev",
-        "beforeBuildCommand": "pnpm build"
+        "beforeBuildCommand": "bun ../scripts/build-chrome-extension.ts && pnpm build"
     },
     "app": {
         "windows": [
@@ -74,6 +74,17 @@
                             ]
                         }
                     ]
+                },
+                {
+                    "identifier": "google-meet-reminder",
+                    "description": "Minimal capability for the Google Meet reminder window",
+                    "windows": [
+                        "google-meet-reminder"
+                    ],
+                    "permissions": [
+                        "core:event:default",
+                        "core:window:default"
+                    ]
                 }
             ]
         }
@@ -94,9 +105,10 @@
             "icons/app_icon.icns",
             "icons/app_icon.ico"
         ],
-        "resources": [
-            "templates/*.json"
-        ],
+        "resources": {
+            "templates/*.json": "templates/",
+            "../../chrome-extension/dist/*": "chrome-extension/"
+        },
         "externalBin": [
             "binaries/llama-helper",
             "binaries/ffmpeg"

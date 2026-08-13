@@ -47,6 +47,7 @@ pub mod onboarding;
 pub mod openai;
 pub mod anthropic;
 pub mod groq;
+pub mod google_meet;
 pub mod openrouter;
 pub mod parakeet_engine;
 pub mod state;
@@ -568,7 +569,11 @@ pub fn run() {
                 cwd
             );
 
-            tray::focus_main_window(app);
+            match google_meet::protocol::parse_google_meet_event_arg(&args) {
+                Ok(Some(event)) => google_meet::commands::dispatch_event(app.clone(), event),
+                Ok(None) => tray::focus_main_window(app),
+                Err(error) => log::warn!("Rejected Google Meet launch event: {error}"),
+            }
         }));
     }
 
@@ -583,9 +588,29 @@ pub fn run() {
             None::<notifications::manager::NotificationManager<tauri::Wry>>,
         )) as NotificationManagerState<tauri::Wry>)
         .manage(audio::init_system_audio_state())
+        .manage(google_meet::GoogleMeetState::default())
         .manage(summary::summary_engine::ModelManagerState(Arc::new(tokio::sync::Mutex::new(None))))
         .setup(|_app| {
             log::info!("Application setup complete");
+
+            let initial_meet_event = match google_meet::protocol::parse_google_meet_event_arg(
+                &std::env::args().collect::<Vec<_>>(),
+            ) {
+                Ok(event) => event,
+                Err(error) => {
+                    log::warn!("Rejected initial Google Meet launch event: {error}");
+                    None
+                }
+            };
+            if initial_meet_event.is_some() {
+                if let Some(main_window) = _app.get_webview_window("main") {
+                    let _ = main_window.hide();
+                }
+            }
+            google_meet::commands::start_coordinator_timer(_app.handle().clone());
+            if let Some(event) = initial_meet_event {
+                google_meet::commands::dispatch_event(_app.handle().clone(), event);
+            }
 
             // Initialize system tray
             if let Err(e) = tray::create_tray(_app.handle()) {
@@ -696,6 +721,19 @@ pub fn run() {
             start_recording,
             stop_recording,
             is_recording,
+            google_meet::commands::install_google_meet_integration,
+            google_meet::commands::set_google_meet_integration_enabled,
+            google_meet::commands::get_google_meet_integration_status,
+            google_meet::commands::google_meet_reminder_ready,
+            google_meet::commands::skip_google_meet_reminder,
+            google_meet::commands::start_google_meet_recording,
+            google_meet::commands::complete_google_meet_recording_start,
+            google_meet::commands::fail_google_meet_recording_start,
+            google_meet::commands::stop_google_meet_recording,
+            google_meet::commands::keep_google_meet_recording,
+            google_meet::commands::show_google_meet_test_reminder,
+            google_meet::commands::dismiss_google_meet_test_reminder,
+            google_meet::commands::open_meetily_from_reminder,
             get_transcription_status,
             read_audio_file,
             save_transcript,

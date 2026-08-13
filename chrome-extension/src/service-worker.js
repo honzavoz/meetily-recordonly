@@ -1,5 +1,16 @@
 import { NATIVE_HOST } from './protocol.js';
 
+const SESSION_KEY_PREFIX = 'meetilyMeetSession:';
+
+export function createTabClosedEvent(lastPayload, occurredAt = new Date()) {
+  return {
+    ...lastPayload,
+    event: 'meeting_left',
+    sequence: lastPayload.sequence + 1,
+    occurredAt: occurredAt.toISOString(),
+  };
+}
+
 export async function sendToNative(sendNativeMessage, payload) {
   let lastError;
 
@@ -15,8 +26,18 @@ export async function sendToNative(sendNativeMessage, payload) {
 }
 
 if (typeof chrome !== 'undefined') {
-  chrome.runtime.onMessage.addListener((payload, _sender, sendResponse) => {
-    sendToNative(chrome.runtime.sendNativeMessage.bind(chrome.runtime), payload)
+  chrome.runtime.onMessage.addListener((payload, sender, sendResponse) => {
+    const sessionKey = sender.tab?.id === undefined
+      ? null
+      : `${SESSION_KEY_PREFIX}${sender.tab.id}`;
+    const trackSession = !sessionKey
+      ? Promise.resolve()
+      : payload.event === 'meeting_left'
+        ? chrome.storage.session.remove(sessionKey)
+        : chrome.storage.session.set({ [sessionKey]: payload });
+
+    trackSession
+      .then(() => sendToNative(chrome.runtime.sendNativeMessage.bind(chrome.runtime), payload))
       .then(async (response) => {
         await chrome.action.setBadgeText({ text: response.accepted ? '' : '!' });
         sendResponse(response);
@@ -31,5 +52,22 @@ if (typeof chrome !== 'undefined') {
       });
 
     return true;
+  });
+
+  chrome.tabs.onRemoved.addListener(async (tabId) => {
+    const sessionKey = `${SESSION_KEY_PREFIX}${tabId}`;
+    const stored = await chrome.storage.session.get(sessionKey);
+    const lastPayload = stored[sessionKey];
+    if (!lastPayload) return;
+
+    await chrome.storage.session.remove(sessionKey);
+    try {
+      await sendToNative(
+        chrome.runtime.sendNativeMessage.bind(chrome.runtime),
+        createTabClosedEvent(lastPayload),
+      );
+    } catch {
+      await chrome.action.setBadgeText({ text: '!' });
+    }
   });
 }
