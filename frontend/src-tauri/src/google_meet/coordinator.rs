@@ -78,7 +78,15 @@ impl Coordinator {
         let session = self.session.as_mut().expect("session initialized");
         match event.event {
             MeetEventKind::MeetingJoined | MeetEventKind::Heartbeat => {
-                if recording || session.skipped || session.prompt_count > 0 {
+                if recording {
+                    session.skipped = true;
+                    return Ok(if session.visible_since.take().is_some() {
+                        Decision::Hide
+                    } else {
+                        Decision::None
+                    });
+                }
+                if session.skipped || session.prompt_count > 0 {
                     return Ok(Decision::None);
                 }
                 session.prompt_count = 1;
@@ -261,6 +269,20 @@ mod tests {
             Ok(Decision::None),
         );
         coordinator.skip(id).unwrap();
+        assert!(coordinator.tick(false, at(60)).is_empty());
+    }
+
+    #[test]
+    fn heartbeat_hides_a_visible_prompt_after_manual_recording_starts() {
+        let mut coordinator = Coordinator::default();
+        let id = Uuid::new_v4();
+        coordinator
+            .accept(event(id, 1, MeetEventKind::MeetingJoined, 0), false, at(0))
+            .unwrap();
+        assert_eq!(
+            coordinator.accept(event(id, 2, MeetEventKind::Heartbeat, 2), true, at(2)),
+            Ok(Decision::Hide),
+        );
         assert!(coordinator.tick(false, at(60)).is_empty());
     }
 

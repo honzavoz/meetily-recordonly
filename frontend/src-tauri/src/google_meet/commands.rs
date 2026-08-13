@@ -196,7 +196,7 @@ pub fn skip_google_meet_reminder(
 }
 
 #[tauri::command]
-pub fn start_google_meet_recording(
+pub async fn start_google_meet_recording(
     app: tauri::AppHandle,
     state: State<'_, GoogleMeetState>,
     session_id: Uuid,
@@ -208,6 +208,15 @@ pub fn start_google_meet_recording(
         .has_session(session_id)
     {
         return Err("Google Meet session is no longer active".into());
+    }
+    if crate::is_recording().await {
+        state
+            .coordinator
+            .lock()
+            .map_err(|error| error.to_string())?
+            .skip(session_id)
+            .map_err(|error| error.to_string())?;
+        return window::hide(&app);
     }
     let main = app
         .get_webview_window("main")

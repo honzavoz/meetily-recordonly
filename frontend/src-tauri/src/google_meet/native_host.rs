@@ -2,7 +2,7 @@ use super::protocol::MeetEvent;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 
@@ -80,6 +80,9 @@ fn deliver(event: &MeetEvent) -> Result<(), NativeHostError> {
     Command::new(executable)
         .arg("--google-meet-event")
         .arg(payload)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .map_err(|error| NativeHostError::Launch(error.to_string()))?;
     Ok(())

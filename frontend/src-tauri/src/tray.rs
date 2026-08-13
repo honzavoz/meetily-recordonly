@@ -157,8 +157,10 @@ pub async fn stop_recording_and_post_process<R: Runtime>(
     )
     .await?;
 
-    app.emit("recording-stop-complete", true)
-        .map_err(|error| format!("Failed to start recording post-processing: {error}"))
+    if let Err(error) = app.emit("recording-stop-complete", true) {
+        log::error!("Failed to start recording post-processing: {error}");
+    }
+    Ok(())
 }
 
 fn check_updates_handler<R: Runtime>(app: &AppHandle<R>) {
