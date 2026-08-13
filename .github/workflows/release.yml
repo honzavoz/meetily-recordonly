@@ -82,12 +82,16 @@ jobs:
             const owner = context.repo.owner
             const repo = context.repo.repo
             const tag = `v${{ steps.get-version.outputs.version }}`
+            const releaseName = `Meetily v${{ steps.get-version.outputs.version }}`
             const releases = await github.paginate(github.rest.repos.listReleases, {
               owner,
               repo,
               per_page: 100
             })
-            const matching = releases.filter(release => release.tag_name === tag)
+            const matching = releases.filter(release =>
+              release.tag_name === tag ||
+              (release.draft && release.name === releaseName && release.tag_name.startsWith('untagged-'))
+            )
             if (matching.length > 1) {
               throw new Error(`Multiple releases exist for ${tag}; refusing ambiguous retry`)
             }
@@ -101,6 +105,7 @@ jobs:
                 owner,
                 repo,
                 release_id: matchingRelease.id,
+                tag_name: tag,
                 target_commitish: context.sha
               })
               matchingRelease = updatedDraft
@@ -120,7 +125,7 @@ jobs:
                 repo,
                 tag_name: tag,
                 target_commitish: context.sha,
-                name: `Meetily v${{ steps.get-version.outputs.version }}`,
+                name: releaseName,
                 draft: true,
                 prerelease: false,
                 generate_release_notes: true
@@ -177,7 +182,7 @@ jobs:
             const fs = require('node:fs')
             const path = require('node:path')
 
-            const { data: release } = await github.rest.repos.getRelease({
+            let { data: release } = await github.rest.repos.getRelease({
               owner,
               repo,
               release_id: releaseId
@@ -185,8 +190,22 @@ jobs:
             if (!release.draft) {
               throw new Error('Release must remain a draft until verification succeeds')
             }
+            if (release.tag_name.startsWith('untagged-')) {
+              const updated = await github.rest.repos.updateRelease({
+                owner,
+                repo,
+                release_id: releaseId,
+                tag_name: expectedTag,
+                target_commitish: context.sha
+              })
+              release = updated.data
+              core.info(`Restored temporary draft tag to ${expectedTag}`)
+            }
             if (release.tag_name !== expectedTag) {
               throw new Error(`Draft release tag ${release.tag_name} does not match ${expectedTag}`)
+            }
+            if (release.target_commitish !== context.sha) {
+              throw new Error(`Draft release target ${release.target_commitish} does not match verified commit ${context.sha}`)
             }
 
             const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
