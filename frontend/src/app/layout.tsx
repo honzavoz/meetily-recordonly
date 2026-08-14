@@ -18,6 +18,7 @@ import { OllamaDownloadProvider } from '@/contexts/OllamaDownloadContext'
 import { TranscriptProvider } from '@/contexts/TranscriptContext'
 import { ConfigProvider, useConfig } from '@/contexts/ConfigContext'
 import { OnboardingProvider } from '@/contexts/OnboardingContext'
+import { ModelLicenseProvider } from '@/contexts/ModelLicenseContext'
 import { OnboardingFlow } from '@/components/onboarding'
 import { loadBetaFeatures } from '@/types/betaFeatures'
 import { DownloadProgressToastProvider } from '@/components/shared/DownloadProgressToast'
@@ -354,12 +355,13 @@ function MainApplicationLayout({
             <TranscriptProvider>
               <ConfigProvider>
                 <OllamaDownloadProvider>
-                  <OnboardingProvider>
-                    <UpdateCheckProvider>
-                      <SidebarProvider>
-                        <TooltipProvider>
-                          <RecordingPostProcessingProvider>
-                            <ImportDialogProvider onOpen={handleOpenImportDialog}>
+                  <ModelLicenseProvider>
+                    <OnboardingProvider>
+                      <UpdateCheckProvider>
+                        <SidebarProvider>
+                          <TooltipProvider>
+                            <RecordingPostProcessingProvider>
+                              <ImportDialogProvider onOpen={handleOpenImportDialog}>
                               {/* Download progress toast provider - listens for background downloads */}
                               <DownloadProgressToastProvider />
 
@@ -381,13 +383,13 @@ function MainApplicationLayout({
                                 importTitle={importTitle}
                                 onComplete={handleImportComplete}
                               />
-                            </ImportDialogProvider>
-                          </RecordingPostProcessingProvider>
-                        </TooltipProvider>
-                      </SidebarProvider>
-                    </UpdateCheckProvider>
-                  </OnboardingProvider>
-
+                              </ImportDialogProvider>
+                            </RecordingPostProcessingProvider>
+                          </TooltipProvider>
+                        </SidebarProvider>
+                      </UpdateCheckProvider>
+                    </OnboardingProvider>
+                  </ModelLicenseProvider>
                 </OllamaDownloadProvider>
               </ConfigProvider>
             </TranscriptProvider>

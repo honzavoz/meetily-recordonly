@@ -157,6 +157,14 @@ pub struct ModelDef {
 
     /// Short description for UI
     pub description: String,
+
+    pub license_id: String,
+    pub license_url: String,
+    pub source_url: String,
+    pub attribution: String,
+    pub license_revision: String,
+    pub download_available: bool,
+    pub download_unavailable_reason: Option<String>,
 }
 
 /// Get all available built-in AI models
@@ -175,6 +183,13 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 24,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "Balanced Qwen 3.5 model for built-in summaries. Higher quality with modest local requirements.".to_string(),
+            license_id: "Apache-2.0".to_string(),
+            license_url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+            source_url: "https://huggingface.co/unsloth/Qwen3.5-2B-GGUF".to_string(),
+            attribution: "Qwen 3.5 2B model weights by the Qwen team; GGUF quantization distributed by Unsloth.".to_string(),
+            license_revision: "apache-2.0:qwen3.5:2026-02-16".to_string(),
+            download_available: true,
+            download_unavailable_reason: None,
         },
         // Qwen 3.5 4B - High quality tier
         ModelDef {
@@ -188,6 +203,13 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 32,
             sampling: SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]),
             description: "High-quality Qwen 3.5 model for built-in summaries. Best local Qwen option in the current lineup.".to_string(),
+            license_id: "Apache-2.0".to_string(),
+            license_url: "https://www.apache.org/licenses/LICENSE-2.0".to_string(),
+            source_url: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF".to_string(),
+            attribution: "Qwen 3.5 4B model weights by the Qwen team; GGUF quantization distributed by Unsloth.".to_string(),
+            license_revision: "apache-2.0:qwen3.5:2026-02-16".to_string(),
+            download_available: true,
+            download_unavailable_reason: None,
         },
         // Gemma 3 4B - Legacy alternative retained for users who prefer Gemma output.
         ModelDef {
@@ -201,6 +223,13 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 35,
             sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Balanced model. Great quality/speed trade-off. Requires ~3.5GB RAM.".to_string(),
+            license_id: "Gemma Terms of Use".to_string(),
+            license_url: "https://ai.google.dev/gemma/terms".to_string(),
+            source_url: "https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF".to_string(),
+            attribution: "Google Gemma 3 model weights; GGUF conversion published by bartowski.".to_string(),
+            license_revision: "gemma-terms:not-accepted".to_string(),
+            download_available: false,
+            download_unavailable_reason: Some("New Gemma downloads are disabled until the current Gemma terms can be displayed and explicitly accepted.".to_string()),
         },
         // Gemma 3 1B - Visible legacy tier retained for already-shipped users.
         ModelDef {
@@ -214,6 +243,13 @@ pub fn get_available_models() -> Vec<ModelDef> {
             layer_count: 26,
             sampling: SamplingParams::gemma3_instruct(vec!["<end_of_turn>".to_string()]),
             description: "Fastest model. Runs on any hardware with ~1GB RAM. Good for quick summaries.".to_string(),
+            license_id: "Gemma Terms of Use".to_string(),
+            license_url: "https://ai.google.dev/gemma/terms".to_string(),
+            source_url: "https://huggingface.co/bartowski/google_gemma-3-1b-it-GGUF".to_string(),
+            attribution: "Google Gemma 3 model weights; GGUF conversion published by bartowski.".to_string(),
+            license_revision: "gemma-terms:not-accepted".to_string(),
+            download_available: false,
+            download_unavailable_reason: Some("New Gemma downloads are disabled until the current Gemma terms can be displayed and explicitly accepted.".to_string()),
         },
     ]
 }
@@ -344,6 +380,10 @@ mod tests {
         assert_eq!(qwen_2b.size_mb, 1221);
         assert_eq!(qwen_2b.context_size, 32768);
         assert_eq!(qwen_2b.layer_count, 24);
+        assert_eq!(qwen_2b.license_id, "Apache-2.0");
+        assert!(qwen_2b.license_url.starts_with("https://"));
+        assert!(qwen_2b.source_url.starts_with("https://"));
+        assert!(qwen_2b.download_available);
         assert_eq!(qwen_2b.sampling, SamplingParams::qwen35_summary(vec!["<|im_end|>".to_string()]));
 
         let qwen_4b = get_model_by_name("qwen3.5:4b").expect("qwen 4b model should exist");
@@ -376,6 +416,12 @@ mod tests {
         assert_eq!(gemma_1b.sampling.frequency_penalty, 0.0);
         assert_eq!(gemma_1b.sampling.repeat_penalty, 1.0);
         assert_eq!(gemma_1b.sampling.penalty_last_n, 0);
+        assert!(!gemma_1b.download_available);
+        assert!(gemma_1b
+            .download_unavailable_reason
+            .as_deref()
+            .unwrap()
+            .contains("terms"));
 
         let gemma_4b = get_model_by_name("gemma3:4b").expect("gemma 4b model should exist");
         assert_eq!(

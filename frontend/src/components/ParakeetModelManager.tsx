@@ -11,6 +11,7 @@ import {
   getModelDisplayName,
   formatFileSize
 } from '../lib/parakeet';
+import { useModelLicenseDownload } from '@/contexts/ModelLicenseContext';
 
 interface ParakeetModelManagerProps {
   selectedModel?: string;
@@ -25,6 +26,7 @@ export function ParakeetModelManager({
   className = '',
   autoSave = false
 }: ParakeetModelManagerProps) {
+  const requestModelDownload = useModelLicenseDownload();
   const [models, setModels] = useState<ParakeetModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -250,22 +252,24 @@ export function ParakeetModelManager({
     const displayName = displayInfo?.friendlyName || modelName;
 
     try {
-      setDownloadingModels(prev => new Set([...prev, modelName]));
+      await requestModelDownload(modelName, async () => {
+        setDownloadingModels(prev => new Set([...prev, modelName]));
 
-      setModels(prevModels =>
-        prevModels.map(model =>
-          model.name === modelName
-            ? { ...model, status: { Downloading: 0 } as ModelStatus }
-            : model
-        )
-      );
+        setModels(prevModels =>
+          prevModels.map(model =>
+            model.name === modelName
+              ? { ...model, status: { Downloading: 0 } as ModelStatus }
+              : model
+          )
+        );
 
-      toast.info(`Downloading ${displayName}...`, {
-        description: 'This may take a few minutes',
-        duration: 5000  // Auto-dismiss after 5 seconds
+        toast.info(`Downloading ${displayName}...`, {
+          description: 'This may take a few minutes',
+          duration: 5000  // Auto-dismiss after 5 seconds
+        });
+
+        await ParakeetAPI.downloadModel(modelName);
       });
-
-      await ParakeetAPI.downloadModel(modelName);
     } catch (err) {
       console.error('Download failed:', err);
       setDownloadingModels(prev => {

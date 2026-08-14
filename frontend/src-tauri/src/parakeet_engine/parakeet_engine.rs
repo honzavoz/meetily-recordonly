@@ -78,6 +78,11 @@ pub struct ModelInfo {
     pub speed: String,     // Performance description
     pub status: ModelStatus,
     pub description: String,
+    pub license_id: String,
+    pub license_url: String,
+    pub source_url: String,
+    pub attribution: String,
+    pub license_revision: String,
 }
 
 #[derive(Debug)]
@@ -243,6 +248,17 @@ impl ParakeetEngine {
                 speed: speed.to_string(),
                 status,
                 description: description.to_string(),
+                license_id: "CC-BY-4.0".to_string(),
+                license_url: "https://creativecommons.org/licenses/by/4.0/legalcode".to_string(),
+                source_url: format!(
+                    "https://huggingface.co/istupakov/parakeet-tdt-0.6b-{}-onnx",
+                    if name.contains("-v2-") { "v2" } else { "v3" }
+                ),
+                attribution: format!(
+                    "NVIDIA Parakeet TDT 0.6B {} model; ONNX conversion published by Igor Stupakov.",
+                    if name.contains("-v2-") { "v2" } else { "v3" }
+                ),
+                license_revision: format!("cc-by-4.0:{name}:2026-08-14"),
             };
 
             models.push(model_info);
@@ -594,8 +610,7 @@ impl ParakeetEngine {
         let base_url = if model_name.contains("-v2-") {
             "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx/resolve/main"
         } else {
-            // Default to v3 for v3 models
-            "https://meetily.towardsgeneralintelligence.com/models/parakeet-tdt-0.6b-v3-onnx"
+            "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main"
         };
 
         // Determine which files to download based on quantization

@@ -8,6 +8,13 @@ export interface BuiltInModelInfo {
   context_size: number;
   description: string;
   gguf_file: string;
+  license_id: string;
+  license_url: string;
+  source_url: string;
+  attribution: string;
+  license_revision: string;
+  download_available: boolean;
+  download_unavailable_reason?: string;
 }
 
 export type BuiltInModelStatus =

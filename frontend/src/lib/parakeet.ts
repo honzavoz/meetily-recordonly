@@ -8,6 +8,11 @@ export interface ParakeetModelInfo {
   status: ModelStatus;
   description?: string;
   quantization: QuantizationType;
+  license_id: string;
+  license_url: string;
+  source_url: string;
+  attribution: string;
+  license_revision: string;
 }
 
 export type QuantizationType = 'FP32' | 'Int8';
@@ -182,6 +187,10 @@ export class ParakeetAPI {
 
   static async downloadModel(modelName: string): Promise<void> {
     await invoke('parakeet_download_model', { modelName });
+  }
+
+  static async retryDownload(modelName: string): Promise<void> {
+    await invoke('parakeet_retry_download', { modelName });
   }
 
   static async cancelDownload(modelName: string): Promise<void> {

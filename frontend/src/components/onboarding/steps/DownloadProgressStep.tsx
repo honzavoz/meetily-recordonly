@@ -8,6 +8,8 @@ import { useOnboarding } from '@/contexts/OnboardingContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getSummaryModelSizeLabel, getSummaryModelSizeMb } from '@/lib/onboarding-summary-model';
+import { useModelLicenseDownload } from '@/contexts/ModelLicenseContext';
+import { BuiltInAIAPI } from '@/lib/builtin-ai';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -23,6 +25,7 @@ interface DownloadState {
 }
 
 export function DownloadProgressStep() {
+  const requestModelDownload = useModelLicenseDownload();
   const {
     goNext,
     selectedSummaryModel,
@@ -33,6 +36,7 @@ export function DownloadProgressStep() {
     setSummaryModelDownloaded,
     startBackgroundDownloads,
     completeOnboarding,
+    retryParakeetDownload,
   } = useOnboarding();
 
   const [isMac, setIsMac] = useState(false);
@@ -81,7 +85,7 @@ export function DownloadProgressStep() {
     }));
 
     try {
-      await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
+      await retryParakeetDownload();
       // Progress events will update state
     } catch (error) {
       console.error('[DownloadProgressStep] Retry failed:', error);
@@ -130,7 +134,13 @@ export function DownloadProgressStep() {
       if (!modelName) {
         throw new Error('Summary model recommendation is not ready yet');
       }
-      await invoke('builtin_ai_download_model', { modelName });
+      const result = await requestModelDownload(
+        modelName,
+        () => BuiltInAIAPI.downloadModel(modelName),
+      );
+      if (result !== 'started') {
+        throw new Error('Model license was not accepted');
+      }
     } catch (error) {
       console.error('[DownloadProgressStep] Summary retry failed:', error);
       setSummaryState((prev) => ({

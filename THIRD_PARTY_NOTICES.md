@@ -72,11 +72,11 @@ before downloading it.
 
 - Qwen 3.5 GGUF — Apache-2.0:
   https://huggingface.co/unsloth/Qwen3.5-2B-GGUF
-- NVIDIA Parakeet TDT ONNX conversions — CC-BY-4.0:
-  https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx
-- whisper.cpp model files — upstream model notice:
+- NVIDIA Parakeet TDT v2/v3 ONNX conversions — CC-BY-4.0:
+  https://huggingface.co/istupakov/parakeet-tdt-0.6b-v2-onnx and
+  https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx
+- whisper.cpp model files — MIT:
   https://huggingface.co/ggerganov/whisper.cpp
 
 Google Gemma weights are not offered for a new download unless their current
 terms can be displayed and explicitly accepted.
-

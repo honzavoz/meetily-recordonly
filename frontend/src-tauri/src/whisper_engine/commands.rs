@@ -114,6 +114,11 @@ fn discover_models_standalone() -> Result<Vec<ModelInfo>, String> {
             accuracy: accuracy.to_string(),
             speed: speed.to_string(),
             description: description.to_string(),
+            license_id: "MIT".to_string(),
+            license_url: "https://opensource.org/license/mit".to_string(),
+            source_url: "https://huggingface.co/ggerganov/whisper.cpp".to_string(),
+            attribution: "OpenAI Whisper model weights converted to GGML format and distributed by the whisper.cpp project.".to_string(),
+            license_revision: "mit:ggerganov-whisper.cpp:2026-08-14".to_string(),
         });
     }
 

@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils';
 import { Download, RefreshCw, BadgeAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatSummaryModelSizeLabelFromMb } from '@/lib/onboarding-summary-model';
+import { useModelLicenseDownload } from '@/contexts/ModelLicenseContext';
+import { BuiltInAIAPI } from '@/lib/builtin-ai';
 
 interface ModelInfo {
   name: string;
@@ -21,6 +23,13 @@ interface ModelInfo {
   context_size: number;
   description: string;
   gguf_file: string;
+  license_id: string;
+  license_url: string;
+  source_url: string;
+  attribution: string;
+  license_revision: string;
+  download_available: boolean;
+  download_unavailable_reason?: string;
 }
 
 interface DownloadProgressInfo {
@@ -40,6 +49,7 @@ export function BuiltInModelManager({
   onModelSelect,
   layout = 'inline',
 }: BuiltInModelManagerProps) {
+  const requestModelDownload = useModelLicenseDownload();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [hasFetched, setHasFetched] = useState<boolean>(false);
@@ -200,10 +210,10 @@ export function BuiltInModelManager({
 
   const downloadModel = async (modelName: string) => {
     try {
-      // Optimistically add to downloadingModels for immediate UI feedback
-      setDownloadingModels((prev) => new Set([...prev, modelName]));
-
-      await invoke('builtin_ai_download_model', { modelName });
+      await requestModelDownload(modelName, async () => {
+        setDownloadingModels((prev) => new Set([...prev, modelName]));
+        await BuiltInAIAPI.downloadModel(modelName);
+      });
     } catch (error) {
       console.error('Failed to download model:', error);
 
@@ -348,7 +358,7 @@ export function BuiltInModelManager({
                 </div>
                 <div className="flex w-full shrink-0 flex-wrap items-center gap-2 sm:ml-4 sm:w-auto sm:justify-end">
                   {/* Not Downloaded - Show Download button */}
-                  {isNotDownloaded && !modelIsDownloading && (
+                  {isNotDownloaded && !modelIsDownloading && model.download_available && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -360,6 +370,11 @@ export function BuiltInModelManager({
                     >
                       <Download className="mr-2 h-4 w-4" />
                       Download
+                    </Button>
+                  )}
+                  {isNotDownloaded && !modelIsDownloading && !model.download_available && (
+                    <Button variant="outline" size="sm" className="min-w-[100px]" disabled>
+                      Unavailable
                     </Button>
                   )}
                   {/* Downloading - Show Cancel button */}
@@ -377,7 +392,7 @@ export function BuiltInModelManager({
                     </Button>
                   )}
                   {/* Error - Show Retry button */}
-                  {isError && !modelIsDownloading && (
+                  {isError && !modelIsDownloading && model.download_available && (
                     <Button
                       variant="outline"
                       size="sm"
@@ -394,17 +409,19 @@ export function BuiltInModelManager({
                   {/* Corrupted - Show both Retry and Delete buttons */}
                   {isCorrupted && !modelIsDownloading && (
                     <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          downloadModel(model.name);
-                        }}
-                      >
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Retry
-                      </Button>
+                      {model.download_available && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            downloadModel(model.name);
+                          }}
+                        >
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Retry
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
@@ -446,8 +463,13 @@ export function BuiltInModelManager({
                       : 'An error occurred'}
                   </p>
                 )}
+                {!model.download_available && !isAvailable && model.download_unavailable_reason && (
+                  <p className="mb-1 text-xs leading-5 text-amber-700">
+                    {model.download_unavailable_reason}
+                  </p>
+                )}
                 <div className="text-xs text-gray-500">
-                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens</span>
+                  <span>{formatSummaryModelSizeLabelFromMb(model.size_mb)} • {model.context_size} tokens • {model.license_id}</span>
                 </div>
                 </div>
               </div>

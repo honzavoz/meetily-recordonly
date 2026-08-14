@@ -99,6 +99,14 @@ pub struct ModelInfo {
     /// Description
     pub description: String,
 
+    pub license_id: String,
+    pub license_url: String,
+    pub source_url: String,
+    pub attribution: String,
+    pub license_revision: String,
+    pub download_available: bool,
+    pub download_unavailable_reason: Option<String>,
+
     /// GGUF filename on disk
     pub gguf_file: String,
 }
@@ -278,6 +286,13 @@ impl ModelManager {
                 context_size: model_def.context_size,
                 description: model_def.description.clone(),
                 gguf_file: model_def.gguf_file.clone(),
+                license_id: model_def.license_id.clone(),
+                license_url: model_def.license_url.clone(),
+                source_url: model_def.source_url.clone(),
+                attribution: model_def.attribution.clone(),
+                license_revision: model_def.license_revision.clone(),
+                download_available: model_def.download_available,
+                download_unavailable_reason: model_def.download_unavailable_reason.clone(),
             };
 
             models_map.insert(model_def.name.clone(), model_info);
@@ -367,6 +382,14 @@ impl ModelManager {
         // Get model definition
         let model_def = get_model_by_name(model_name)
             .ok_or_else(|| anyhow!("Unknown model: {}", model_name))?;
+        if !model_def.download_available {
+            return Err(anyhow!(
+                "{}",
+                model_def.download_unavailable_reason.unwrap_or_else(||
+                    "This model is not available for a new download".to_string()
+                )
+            ));
+        }
 
         // Add to active downloads
         {

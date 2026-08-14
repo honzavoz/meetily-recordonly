@@ -5,6 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { PermissionStatus, OnboardingPermissions } from '@/types/onboarding';
 import { resolveOnboardingSummaryModelStatus } from '@/lib/onboarding-summary-model';
+import { useModelLicenseDownload } from '@/contexts/ModelLicenseContext';
+import { BuiltInAIAPI } from '@/lib/builtin-ai';
+import { ParakeetAPI } from '@/lib/parakeet';
 
 const PARAKEET_MODEL = 'parakeet-tdt-0.6b-v3-int8';
 
@@ -74,6 +77,7 @@ interface StartBackgroundDownloadsOptions {
 const OnboardingContext = createContext<OnboardingContextType | undefined>(undefined);
 
 export function OnboardingProvider({ children }: { children: React.ReactNode }) {
+  const requestModelDownload = useModelLicenseDownload();
   const [currentStep, setCurrentStep] = useState(1);
   const [completed, setCompleted] = useState(false);
   const [parakeetDownloaded, setParakeetDownloaded] = useState(false);
@@ -135,15 +139,23 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
     }
   };
 
-  const requestSummaryModelDownload = (modelName: string) => {
+  const requestSummaryModelDownload = async (modelName: string) => {
     console.log('[OnboardingContext] Starting Summary Model download');
-    invoke('builtin_ai_download_model', { modelName })
-      .catch(err => {
-        if (String(err).includes('Download already in progress')) {
-          return;
-        }
-        console.error('[OnboardingContext] Summary Model download failed:', err);
-      });
+    try {
+      const result = await requestModelDownload(
+        modelName,
+        () => BuiltInAIAPI.downloadModel(modelName),
+      );
+      if (result !== 'started') {
+        throw new Error('Model license was not accepted');
+      }
+    } catch (err) {
+      if (String(err).includes('Download already in progress')) {
+        return;
+      }
+      console.error('[OnboardingContext] Summary Model download failed:', err);
+      throw err;
+    }
   };
 
   // Load status on mount and initialize database
@@ -484,7 +496,7 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       });
       setSummaryModelDownloaded(selectedModelReady);
       if (!selectedModelReady) {
-        requestSummaryModelDownload(modelToSave);
+        await requestSummaryModelDownload(modelToSave);
       }
 
       // Onboarding always uses builtin-ai with selected model
@@ -531,13 +543,18 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
       // Start Parakeet download first (speech recognition - always required)
       if (shouldStartParakeet) {
         console.log('[OnboardingContext] Starting Parakeet download');
-        invoke('parakeet_download_model', { modelName: PARAKEET_MODEL })
-          .catch(err => console.error('[OnboardingContext] Parakeet download failed:', err));
+        const result = await requestModelDownload(
+          PARAKEET_MODEL,
+          () => ParakeetAPI.downloadModel(PARAKEET_MODEL),
+        );
+        if (result !== 'started') {
+          throw new Error('Model license was not accepted');
+        }
       }
 
       // Start selected Summary Model download immediately so completion cannot race the request.
       if (shouldStartSummary && summaryModel) {
-        requestSummaryModelDownload(summaryModel);
+        await requestSummaryModelDownload(summaryModel);
       }
     } catch (error) {
       console.error('[OnboardingContext] Failed to start background downloads:', error);
@@ -567,7 +584,13 @@ export function OnboardingProvider({ children }: { children: React.ReactNode }) 
   const retryParakeetDownload = async () => {
     console.log('[OnboardingContext] Retrying Parakeet download');
     try {
-      await invoke('parakeet_retry_download', { modelName: PARAKEET_MODEL });
+      const result = await requestModelDownload(
+        PARAKEET_MODEL,
+        () => ParakeetAPI.retryDownload(PARAKEET_MODEL),
+      );
+      if (result !== 'started') {
+        throw new Error('Model license was not accepted');
+      }
     } catch (error) {
       console.error('[OnboardingContext] Retry failed:', error);
       throw error;

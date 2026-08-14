@@ -9,6 +9,10 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const tauriConfig = JSON.parse(
   readFileSync(resolve(repositoryRoot, 'frontend/src-tauri/tauri.conf.json'), 'utf8'),
 );
+const thirdPartyNotices = readFileSync(
+  resolve(repositoryRoot, 'THIRD_PARTY_NOTICES.md'),
+  'utf8',
+);
 
 test('desktop bundle maps the project and FFmpeg license notices into resources', () => {
   assert.equal(tauriConfig.bundle.resources['../../LICENSE.md'], 'licenses/LICENSE.md');
@@ -39,4 +43,11 @@ test('Chrome extension build contains the project and third-party notices', () =
       `${filename} must be bundled in the extension`,
     );
   }
+});
+
+test('third-party notices identify every downloadable model family and license', () => {
+  assert.match(thirdPartyNotices, /Qwen 3\.5 GGUF — Apache-2\.0/);
+  assert.match(thirdPartyNotices, /Parakeet TDT v2\/v3 ONNX conversions — CC-BY-4\.0/);
+  assert.match(thirdPartyNotices, /whisper\.cpp model files/);
+  assert.match(thirdPartyNotices, /Gemma weights are not offered for a new download/);
 });

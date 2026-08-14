@@ -14,6 +14,7 @@ import {
   WhisperAPI
 } from '../lib/whisper';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { useModelLicenseDownload } from '@/contexts/ModelLicenseContext';
 
 interface ModelManagerProps {
   selectedModel?: string;
@@ -28,6 +29,7 @@ export function ModelManager({
   className = '',
   autoSave = false
 }: ModelManagerProps) {
+  const requestModelDownload = useModelLicenseDownload();
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -295,22 +297,24 @@ export function ModelManager({
     const displayName = getDisplayName(modelName);
 
     try {
-      updateDownloadingModels(prev => new Set([...prev, modelName]));
+      await requestModelDownload(modelName, async () => {
+        updateDownloadingModels(prev => new Set([...prev, modelName]));
 
-      setModels(prevModels =>
-        prevModels.map(model =>
-          model.name === modelName
-            ? { ...model, status: { Downloading: 0 } as ModelStatus }
-            : model
-        )
-      );
+        setModels(prevModels =>
+          prevModels.map(model =>
+            model.name === modelName
+              ? { ...model, status: { Downloading: 0 } as ModelStatus }
+              : model
+          )
+        );
 
-      toast.info(`Downloading ${displayName}...`, {
-        description: 'This may take a few minutes',
-        duration: 5000
+        toast.info(`Downloading ${displayName}...`, {
+          description: 'This may take a few minutes',
+          duration: 5000
+        });
+
+        await WhisperAPI.downloadModel(modelName);
       });
-
-      await WhisperAPI.downloadModel(modelName);
     } catch (err) {
       console.error('Download failed:', err);
       updateDownloadingModels(prev => {

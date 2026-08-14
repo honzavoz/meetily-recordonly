@@ -7,6 +7,11 @@ export interface ModelInfo {
   speed: ProcessingSpeed;
   status: ModelStatus;
   description?: string;
+  license_id: string;
+  license_url: string;
+  source_url: string;
+  attribution: string;
+  license_revision: string;
 }
 
 export type ModelAccuracy = 'High' | 'Good' | 'Decent';
