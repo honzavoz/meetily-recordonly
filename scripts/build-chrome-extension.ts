@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rename, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,7 @@ try {
 
   const manifest = JSON.parse(await readFile(join(extensionRoot, 'manifest.json'), 'utf8'));
   await Bun.write(join(stagingDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  await cp(join(extensionRoot, 'icons'), join(stagingDirectory, 'icons'), { recursive: true });
 
   await rm(outputDirectory, { recursive: true, force: true });
   await rename(stagingDirectory, outputDirectory);

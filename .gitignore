@@ -19,6 +19,7 @@
 /coverage
 /dist
 /chrome-extension/dist/
+/artifacts/
 
 # next.js
 /.next/

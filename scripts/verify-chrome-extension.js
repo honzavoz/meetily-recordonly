@@ -23,6 +23,19 @@ if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(['https://meet.
   fail('manifest.json', 'host_permissions must contain only Google Meet');
 }
 
+const expectedIcons = {
+  16: 'icons/icon16.png',
+  32: 'icons/icon32.png',
+  48: 'icons/icon48.png',
+  128: 'icons/icon128.png',
+};
+if (JSON.stringify(manifest.icons) !== JSON.stringify(expectedIcons)) {
+  fail('manifest.json', 'extension icons must include 16, 32, 48, and 128 pixel assets');
+}
+for (const filename of Object.values(expectedIcons)) {
+  if (!fs.existsSync(path.join(directory, filename))) fail(filename, 'file is missing');
+}
+
 for (const filename of ['content.js', 'service-worker.js']) {
   const filePath = path.join(directory, filename);
   if (!fs.existsSync(filePath)) fail(filename, 'file is missing');

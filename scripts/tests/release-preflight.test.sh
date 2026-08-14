@@ -159,6 +159,8 @@ release_workflow="$repo_root/.github/workflows/release.yml"
 grep -Fq 'bun test chrome-extension/tests' "$release_workflow" || fail "release does not run Chrome extension tests"
 grep -Fq 'bun scripts/build-chrome-extension.ts' "$release_workflow" || fail "release does not build the Chrome extension"
 grep -Fq 'node scripts/verify-chrome-extension.js chrome-extension/dist' "$release_workflow" || fail "release does not verify the Chrome extension package"
+grep -Fq 'node scripts/verify-chrome-store-identity.js' "$release_workflow" || fail "release does not verify Chrome Web Store identity"
+grep -Fq 'bun scripts/package-chrome-web-store.ts' "$release_workflow" || fail "release does not package the Chrome Web Store upload"
 extension_check_line="$(grep -n 'Verify Chrome reminder extension' "$release_workflow" | head -1 | cut -d: -f1)"
 draft_release_line="$(grep -n 'Find or Create Draft Release' "$release_workflow" | head -1 | cut -d: -f1)"
 [[ -n "$extension_check_line" && -n "$draft_release_line" && "$extension_check_line" -lt "$draft_release_line" ]] \

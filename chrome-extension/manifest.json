@@ -6,12 +6,22 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtoICCR4byemIhY4JCAkpT2sg3gFdE0kSsiF9R/cPpPM5AT+jOczUKB3jT3t2rQ8jiwcdqb8/p1JrzUfvsrN8YrpO0/f992Jb5gag/rB9zriAXprlW1LSO4A5ilYsLIFLSAm5YVqlLbaN95NaURaap7W7ZA2pZXxNoywdjMqUkKnjonDBq2QxipRr/Je4jCLnP4l5OvmZcRCIsX11GHqP+jL5nIZn8AplBQGbXuSwrNIhoHOZR3harpJdkhDLHap6iqQGiJO8WYoZHOTd+OBeejl6NiI2u8ibI5ZR7Xe68by4KdAaTduK1Cwe/Xjvhyk1PR4PwRYxv5eEjFyOv5CsEwIDAQAB",
   "permissions": ["nativeMessaging", "storage"],
   "host_permissions": ["https://meet.google.com/*"],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "background": {
     "service_worker": "service-worker.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Meetily Google Meet Reminder"
+    "default_title": "Meetily Google Meet Reminder",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
   },
   "content_scripts": [
     {
