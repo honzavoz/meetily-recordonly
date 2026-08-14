@@ -105,7 +105,8 @@ test('build cryptographically verifies the official FFmpeg release signature', (
   assert.match(buildScript, /third-party\/ffmpeg\/ffmpeg-devel\.asc/);
   assert.match(buildScript, /--import-options show-only --import/);
   assert.doesNotMatch(buildScript, /--show-keys/);
-  assert.match(buildScript, /gpg .*--verify/);
+  assert.match(buildScript, /gpg .*--dearmor/);
+  assert.match(buildScript, /gpgv .*--keyring/);
 });
 
 for (const [name, workflow] of [

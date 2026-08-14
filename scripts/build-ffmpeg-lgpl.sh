@@ -63,6 +63,7 @@ verify_source_authenticity() {
   local archive=$1
   local signature=$2
   local gnupg_home="$work_directory/gnupg"
+  local verification_keyring="$work_directory/ffmpeg-signing-key.gpg"
 
   if ! command -v gpg >/dev/null 2>&1; then
     echo "GnuPG is required to verify the official FFmpeg release signature" >&2
@@ -80,8 +81,8 @@ verify_source_authenticity() {
     return 1
   fi
 
-  gpg --batch --no-options --homedir "$gnupg_home" --import "$signing_key" >/dev/null
-  gpg --batch --no-options --homedir "$gnupg_home" --verify "$signature" "$archive"
+  gpg --batch --yes --no-options --dearmor --output "$verification_keyring" "$signing_key"
+  gpgv --homedir "$gnupg_home" --keyring "$verification_keyring" "$signature" "$archive"
 }
 
 required_provenance=(
