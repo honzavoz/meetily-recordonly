@@ -18,9 +18,9 @@ pub enum NativeHostError {
     Json(#[from] serde_json::Error),
     #[error("native message failed validation: {0}")]
     Protocol(#[from] super::protocol::ProtocolError),
-    #[error("failed to launch Meetily: {0}")]
+    #[error("failed to launch Record Only: {0}")]
     Launch(String),
-    #[error("Meetily did not acknowledge the event in time")]
+    #[error("Record Only did not acknowledge the event in time")]
     DeliveryTimeout,
 }
 
@@ -127,7 +127,7 @@ fn deliver(event: &MeetEvent) -> Result<NativeHostResponse, NativeHostError> {
 
 pub fn write_delivery_ack(path: &Path, ack: &DeliveryAck) -> Result<(), String> {
     let validated = super::protocol::parse_google_meet_ack_arg(&[
-        "Meetily".into(),
+        "Record Only".into(),
         "--google-meet-ack".into(),
         path.to_string_lossy().into_owned(),
     ])
@@ -154,13 +154,13 @@ pub fn run_stdio() -> i32 {
     let (response, exit_code) = match result {
         Ok(response) => (response, 0),
         Err(error) => {
-            eprintln!("Meetily native host rejected message: {error}");
+            eprintln!("Record Only native host rejected message: {error}");
             (NativeHostResponse::rejected("invalid_native_message"), 1)
         }
     };
 
     if let Err(error) = write_message(&mut std::io::stdout().lock(), &response) {
-        eprintln!("Meetily native host failed to write response: {error}");
+        eprintln!("Record Only native host failed to write response: {error}");
         return 1;
     }
     exit_code

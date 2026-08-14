@@ -2,6 +2,8 @@
 name = "llama-helper"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/honzavoz/meetily-recordonly"
 
 [dependencies]
 anyhow = "1.0"

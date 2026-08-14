@@ -2,27 +2,19 @@
 
 ## Product name
 
-Meetily Google Meet Reminder
+Record Only - Meet Reminder
 
 ## Summary
 
-Reminds you to start a local Meetily recording when you join a Google Meet call.
+Reminds you to start a local Record Only recording when you join a Google Meet call.
 
 ## Description
 
-Meetily Google Meet Reminder helps you avoid joining a Google Meet call and forgetting to start your local Meetily recording.
+Record Only - Meet Reminder detects when you join or leave a Google Meet call in Chrome. It sends a small lifecycle signal to the Record Only desktop app, which asks whether you want to start recording. You choose each time. The extension cannot start a recording by itself.
 
-When the extension detects that a call has started, it sends a small local lifecycle signal to the Meetily desktop app. Meetily then shows a reminder and waits for you to choose whether to start recording. Recording never starts automatically.
+The extension does not access meeting audio, video, titles, participant names, chat, captions, meeting URLs, meeting codes, or browsing history. It sends lifecycle signals to the app on your Mac through Chrome Native Messaging. It does not contact a remote server.
 
-Privacy by design:
-
-- No meeting audio or video is accessed by the extension.
-- No titles, participant names, chat messages, captions, meeting URLs, or meeting codes are collected.
-- No browsing history is collected.
-- Lifecycle signals are sent only to the locally installed Meetily desktop app through Chrome Native Messaging.
-- The extension does not send data to a remote server.
-
-Requires Meetily for macOS with Google Meet reminders enabled.
+Record Only for macOS is required. Record Only is an independent fork of Meetily Community Edition and is not endorsed by Zackriya Solutions.
 
 ## Category
 

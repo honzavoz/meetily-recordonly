@@ -2,15 +2,15 @@
 
 ## First-upload identity step
 
-After uploading the initial ZIP, open Package > View public key. Before submitting for review, replace the development `manifest.key` with that public key, update Meetily's native-host allowed origin and Web Store URL to the dashboard Item ID, increment the extension version, rebuild the ZIP, and upload it as the final package. Verify that the dashboard Item ID matches the locally loaded extension ID.
+After uploading the initial ZIP, open Package > View public key. Before submitting for review, replace the development `manifest.key` with that public key, update Record Only's native-host allowed origin and Web Store URL to the dashboard Item ID, increment the extension version, rebuild the ZIP, and upload it as the final package. Verify that the dashboard Item ID matches the locally loaded extension ID.
 
 ## Single purpose
 
-Detect when the user joins or leaves an active Google Meet call and notify the locally installed Meetily desktop application so it can offer a recording reminder.
+Detect when the user joins or leaves an active Google Meet call and notify the locally installed Record Only desktop app so it can offer a recording reminder.
 
 ## Permission justification: nativeMessaging
 
-Required to deliver the call lifecycle signal to the local Meetily desktop application. The native host is fixed to `cz.honzavoz.meetily.recordonly.google_meet`; the extension cannot invoke arbitrary native programs or commands.
+Required to deliver the call lifecycle signal to the local Record Only desktop app. The native host is fixed to `cz.honzavoz.meetily.recordonly.google_meet`; the extension cannot invoke arbitrary native programs or commands.
 
 ## Permission justification: storage
 
@@ -30,11 +30,11 @@ The extension does not collect personally identifiable information, health infor
 
 ## Reviewer instructions
 
-1. Install the current Meetily macOS application.
-2. In Meetily, open Settings > General > Google Meet reminder and select Install in Chrome once so the native host is registered.
+1. Install the current Record Only macOS app.
+2. In Record Only, open Settings > General > Google Meet reminder and select Install in Chrome once so the native host is registered.
 3. Install this extension.
 4. Join a Google Meet test call and wait at least three seconds.
-5. Verify that Meetily shows a recording reminder and does not start recording until Start recording is selected.
-6. Leave the call. If recording was started from the reminder, verify that Meetily offers to stop and save it.
+5. Verify that Record Only shows a recording reminder and does not start recording until Start recording is selected.
+6. Leave the call. If recording was started from the reminder, verify that Record Only offers to stop and save it.
 
-The extension badge displays `!` when the local Meetily native host is unavailable. This is expected when Meetily is not installed or the integration has not been enabled.
+The extension badge displays `!` when the local Record Only native host is unavailable. This is expected when Record Only is not installed or the integration has not been enabled.

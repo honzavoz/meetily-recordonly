@@ -12,7 +12,7 @@
     "app": {
         "windows": [
             {
-                "title": "Meetily",
+                "title": "Record Only",
                 "width": 1100,
                 "height": 700,
                 "resizable": true,
@@ -118,6 +118,7 @@
             "binaries/ffmpeg"
         ],
         "macOS": {
+            "bundleName": "Record Only",
             "entitlements": "entitlements.plist",
             "signingIdentity": "-",
             "hardenedRuntime": true

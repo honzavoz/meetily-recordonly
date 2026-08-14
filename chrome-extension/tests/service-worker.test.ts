@@ -24,7 +24,7 @@ test('retries a missing native host once', async () => {
   expect(calls).toBe(2);
 });
 
-test('does not retry a response rejected by Meetily', async () => {
+test('does not retry a response rejected by Record Only', async () => {
   let calls = 0;
   const response = await sendToNative(async () => {
     calls += 1;

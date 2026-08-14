@@ -1,132 +1,147 @@
-import React, { useState } from "react";
+import React, { useState } from 'react';
 import Image from 'next/image';
-import AnalyticsConsentSwitch from "./AnalyticsConsentSwitch";
-import { UpdateDialog } from "./UpdateDialog";
-import { updateService, UpdateInfo } from '@/services/updateService';
-import { Button } from './ui/button';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { CheckCircle2, FileText, GitFork, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+
+import { UpdateDialog } from './UpdateDialog';
+import { Button } from './ui/button';
 import { useAppVersion } from '@/hooks/useAppVersion';
 import { normalizeUpdaterError } from '@/lib/updater-flow';
-
+import { updateService, UpdateInfo } from '@/services/updateService';
 
 export function About() {
-    const currentVersion = useAppVersion();
-    const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-    const [isChecking, setIsChecking] = useState(false);
-    const [showUpdateDialog, setShowUpdateDialog] = useState(false);
+  const currentVersion = useAppVersion();
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [showUpdateDialog, setShowUpdateDialog] = useState(false);
 
-    const handleCheckForUpdates = async () => {
-        setIsChecking(true);
-        try {
-            const info = await updateService.checkForUpdates(true);
-            setUpdateInfo(info);
-            if (info.available) {
-                setShowUpdateDialog(true);
-            } else {
-                toast.success('You are running the latest version');
-            }
-        } catch (error: unknown) {
-            console.error('Failed to check for updates:', error);
-            toast.error(
-                'Failed to check for updates: ' + normalizeUpdaterError(error, 'Unknown error'),
-            );
-        } finally {
-            setIsChecking(false);
-        }
-    };
+  const handleCheckForUpdates = async () => {
+    setIsChecking(true);
+    try {
+      const info = await updateService.checkForUpdates(true);
+      setUpdateInfo(info);
+      if (info.available) {
+        setShowUpdateDialog(true);
+      } else {
+        toast.success('You are running the latest version');
+      }
+    } catch (error: unknown) {
+      console.error('Failed to check for updates:', error);
+      toast.error(
+        'Failed to check for updates: ' + normalizeUpdaterError(error, 'Unknown error'),
+      );
+    } finally {
+      setIsChecking(false);
+    }
+  };
 
-    return (
-        <div className="p-4 space-y-4 h-[80vh] overflow-y-auto">
-            {/* Compact Header */}
-            <div className="text-center">
-                <div className="mb-3">
-                    <Image
-                        src="icon_128x128.png"
-                        alt="Meetily Logo"
-                        width={64}
-                        height={64}
-                        className="mx-auto"
-                    />
-                </div>
-                {/* <h1 className="text-xl font-bold text-gray-900">Meetily</h1> */}
-                <span className="text-sm text-gray-500"> v{currentVersion}</span>
-                <p className="text-medium text-gray-600 mt-1">
-                    Real-time notes and summaries that never leave your machine.
-                </p>
-                <div className="mt-3">
-                    <Button
-                        onClick={handleCheckForUpdates}
-                        disabled={isChecking}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs"
-                    >
-                        {isChecking ? (
-                            <>
-                                <Loader2 className="h-3 w-3 mr-2 animate-spin" />
-                                Checking...
-                            </>
-                        ) : (
-                            <>
-                                <CheckCircle2 className="h-3 w-3 mr-2" />
-                                Check for Updates
-                            </>
-                        )}
-                    </Button>
-                    {updateInfo?.available && (
-                        <div className="mt-2 text-xs text-blue-600">
-                            Update available: v{updateInfo.version}
-                        </div>
-                    )}
-                </div>
+  const handleOpenNotices = async () => {
+    try {
+      await invoke('open_legal_notices');
+    } catch (error) {
+      toast.error('Could not open license notices', { description: String(error) });
+    }
+  };
+
+  const handleOpenPrivacyPolicy = async () => {
+    try {
+      await invoke('open_external_url', {
+        url: 'https://github.com/honzavoz/meetily-recordonly/blob/main/PRIVACY_POLICY.md',
+      });
+    } catch (error) {
+      toast.error('Could not open privacy policy', { description: String(error) });
+    }
+  };
+
+  return (
+    <div className="h-[80vh] space-y-4 overflow-y-auto p-4">
+      <div className="text-center">
+        <Image
+          src="icon_128x128.png"
+          alt="Record Only"
+          width={64}
+          height={64}
+          className="mx-auto mb-3"
+        />
+        <h1 className="text-xl font-semibold text-gray-950">Record Only</h1>
+        <p className="mt-1 text-xs font-medium text-gray-500">Version {currentVersion}</p>
+        <p className="mt-2 text-sm text-gray-600">
+          Private recording, transcription, and summaries on your Mac.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 text-left">
+        <div className="flex gap-3">
+          <GitFork className="mt-0.5 h-5 w-5 shrink-0 text-blue-700" aria-hidden="true" />
+          <div className="space-y-2">
+            <h2 className="text-sm font-semibold text-blue-950">Independent open-source fork</h2>
+            <p className="text-xs leading-5 text-blue-900">
+              Record Only is an independent fork of Meetily Community Edition, distributed under
+              the MIT License. It is not endorsed by Zackriya Solutions.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={handleOpenNotices}>
+                <FileText className="mr-2 h-4 w-4" aria-hidden="true" />
+                Open license notices
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleOpenPrivacyPolicy}
+              >
+                Privacy policy
+              </Button>
             </div>
-
-            {/* Features Grid - Compact */}
-            <div className="space-y-3">
-                <h2 className="text-base font-semibold text-gray-800">What makes Meetily different</h2>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Privacy-first</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Your data & AI processing workflow can now stay within your premise. No cloud, no leaks.</p>
-                    </div>
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Use Any Model</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Prefer local open-source model? Great. Want to plug in an external API? Also fine. No lock-in.</p>
-                    </div>
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Cost-Smart</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Avoid pay-per-minute bills by running models locally (or pay only for the calls you choose).</p>
-                    </div>
-                    <div className="bg-gray-50 rounded p-3 hover:bg-gray-100 transition-colors">
-                        <h3 className="font-bold text-sm text-gray-900 mb-1">Works everywhere</h3>
-                        <p className="text-xs text-gray-600 leading-relaxed">Google Meet, Zoom, Teams-online or offline.</p>
-                    </div>
-                </div>
-            </div>
-
-            {/* Coming Soon - Compact */}
-            <div className="bg-blue-50 rounded p-3">
-                <p className="text-s text-blue-800">
-                    <span className="font-bold">Coming soon:</span> A library of on-device AI agents-automating follow-ups, action tracking, and more.
-                </p>
-            </div>
-
-            {/* Footer - Compact */}
-            <div className="pt-2 border-t border-gray-200 text-center">
-                <p className="text-xs text-gray-400">
-                    Meetily — private meeting notes on your Mac.
-                </p>
-            </div>
-            <AnalyticsConsentSwitch />
-
-            {/* Update Dialog */}
-            <UpdateDialog
-                open={showUpdateDialog}
-                onOpenChange={setShowUpdateDialog}
-                updateInfo={updateInfo}
-            />
+          </div>
         </div>
+      </div>
 
-    )
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="rounded-lg bg-gray-50 p-3">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Local by default</h2>
+          <p className="text-xs leading-5 text-gray-600">
+            Recordings and local model processing stay on this Mac.
+          </p>
+        </div>
+        <div className="rounded-lg bg-gray-50 p-3">
+          <h2 className="mb-1 text-sm font-semibold text-gray-900">Your choice of AI</h2>
+          <p className="text-xs leading-5 text-gray-600">
+            Use bundled local models or connect a provider you choose.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex justify-center">
+        <Button
+          onClick={handleCheckForUpdates}
+          disabled={isChecking}
+          variant="outline"
+          size="sm"
+        >
+          {isChecking ? (
+            <>
+              <Loader2 className="mr-2 h-3 w-3 animate-spin" aria-hidden="true" />
+              Checking...
+            </>
+          ) : (
+            <>
+              <CheckCircle2 className="mr-2 h-3 w-3" aria-hidden="true" />
+              Check for updates
+            </>
+          )}
+        </Button>
+      </div>
+      {updateInfo?.available && (
+        <p className="text-center text-xs text-blue-600">Update available: v{updateInfo.version}</p>
+      )}
+
+      <UpdateDialog
+        open={showUpdateDialog}
+        onOpenChange={setShowUpdateDialog}
+        updateInfo={updateInfo}
+      />
+    </div>
+  );
 }

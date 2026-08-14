@@ -64,7 +64,7 @@ fn reminder_window(app: &tauri::AppHandle) -> Result<tauri::WebviewWindow, Strin
         WINDOW_LABEL,
         WebviewUrl::App("google-meet-reminder.html".into()),
     )
-    .title("Meetily")
+    .title("Record Only")
     .inner_size(380.0, 210.0)
     .resizable(false)
     .decorations(false)

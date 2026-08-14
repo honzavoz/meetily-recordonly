@@ -1,127 +1,55 @@
-# Meetily Privacy Policy
+# Record Only Privacy Policy
 
-*Last updated: [Current Date]*
+Effective date: 2026-08-14
 
-## Our Privacy-First Commitment
+Record Only is a local desktop application and an independent open-source fork
+of Meetily Community Edition. This policy describes the behavior of the Record
+Only builds published at https://github.com/honzavoz/meetily-recordonly.
 
-Meetily is built on the principle that your meeting data should remain private and under your control. This privacy policy explains how we handle data in our open-source meeting assistant.
+## Local meeting data
 
-## Data Processing Philosophy
+Recordings, transcripts, notes, summaries, preferences, and downloaded models
+are stored on your Mac. Record Only does not operate a cloud service that
+receives this data. Files remain subject to your macOS account permissions,
+backups, synchronization settings, and disk-encryption configuration.
 
-### Local-First Processing
-- **Meeting transcription**: Processed entirely on your device using local Whisper models
-- **Audio recordings**: Never transmitted to external servers
-- **Meeting content**: Remains on your infrastructure
-- **AI summaries**: Generated locally or through your chosen LLM provider
+## Network access you initiate
 
-### Your Data Ownership
-- You own all meeting data, transcripts, and recordings
-- Data is stored locally on your device
-- No vendor lock-in - export your data anytime
-- Complete control over data retention and deletion
+Record Only can make these network requests:
 
-## Usage Analytics
+- The updater checks this fork's GitHub Releases and downloads an update only
+  after you approve it.
+- Local model downloads retrieve files from the source disclosed in the model
+  license dialog, such as Hugging Face or GitHub.
+- If you configure an external AI provider and request a summary, the text
+  required for that request is sent to the provider you selected. The
+  provider's privacy policy and terms then apply.
+- A local Ollama or compatible endpoint receives only requests you direct to
+  that endpoint.
 
-### What We Collect
-Usage analytics is optional and off by default. When you choose to enable it, Meetily collects minimal, anonymized usage data:
+## Usage analytics
 
-**Application Usage:**
-- Feature usage patterns (which tools you use most)
-- Session duration and frequency
-- Performance metrics (transcription success rates, error frequencies)
-- UI interaction patterns (button clicks, navigation flows)
+Usage analytics is disabled in Record Only. The application does not initialize
+the upstream Meetily PostHog project, and the transition release clears any
+analytics opt-in value inherited from an earlier installation.
 
-**Technical Metrics:**
-- Application version and platform information
-- Error logs and crash reports (anonymized)
-- Performance benchmarks (processing times, resource usage)
+## Google Meet reminder
 
-### What We DON'T Collect
-We never collect:
-- ❌ Meeting content, transcripts, or recordings
-- ❌ Personal information or identifiable data
-- ❌ File names, meeting titles, or metadata
-- ❌ Audio data or voice patterns
-- ❌ Participant names or contact information
-- ❌ LLM conversations or AI-generated content
+The optional Chrome extension detects only whether a Google Meet call is active
+and sends join, heartbeat, and leave signals to the desktop app through Chrome
+Native Messaging. It does not read or transmit meeting audio, video, titles,
+participant names, chat, captions, meeting URLs, meeting codes, or browsing
+history. It does not contact a remote server.
 
-### Why We Collect This Data
-When enabled, analytics helps us with:
-- **Product Quality**: Identifying and fixing bugs that impact user experience
-- **Performance Optimization**: Understanding resource usage and system bottlenecks
-- **Security**: Detecting potential security issues and vulnerabilities
-- **Feature Development**: Making data-driven decisions about new features
-- **Open Source Sustainability**: Ensuring the project meets user needs effectively
+## Your control
 
-### Analytics Implementation
-- **Provider**: PostHog (privacy-focused analytics platform)
-- **Default**: Off by default; analytics starts only after you enable it in settings
-- **Anonymization**: All data linked to generated user IDs only - no personal identification
-- **Data retention**: 12 months maximum, then automatically deleted
-- **Encryption**: All data encrypted in transit using industry-standard protocols
-- **Location**: Data processed in accordance with PostHog's privacy policy
-- **Access Control**: Strictly limited to core development team members
+You can inspect, export, or delete local meeting data through the application
+and macOS. Removing local files or the application does not delete information
+you intentionally sent to an external AI provider; use that provider's controls
+for those requests.
 
-## Third-Party Services
+## Changes and contact
 
-### LLM Providers (Optional)
-If you choose to use external LLM providers:
-- **Anthropic Claude**: Subject to Anthropic's privacy policy
-- **Groq**: Subject to Groq's privacy policy
-- **Local Ollama**: Processed entirely on your device
-
-### Analytics Service (Optional)
-- **PostHog**: Used for usage analytics when enabled
-- **Data**: Only anonymized usage patterns, no meeting content
-- **Control**: Completely optional, off by default, and user-controlled
-
-## Your Privacy Rights
-
-### Data Control
-- **Access**: View all data stored locally on your device
-- **Export**: Export your data in standard formats
-- **Delete**: Remove all data from your device
-
-
-### Analytics Transparency
-- **Open source**: Full analytics implementation available for review in our source code
-- **Opt-in**: New and existing installs have analytics disabled until you turn it on
-- **Questions**: Contact us for any analytics-related concerns
-
-## Data Security
-
-### Local Security
-- Data encrypted at rest using your device's security features
-- No transmission of sensitive meeting data
-- Standard file system permissions protect your data
-
-### Open Source Transparency
-- Full source code available for security review
-- Community-audited privacy implementations
-- No hidden data collection or tracking
-
-## Changes to This Policy
-
-We will notify users of any material changes to this privacy policy through:
-- Updates to this document in our GitHub repository
-- Release notes for application updates
-- In-app notifications for significant privacy changes
-
-## Contact Us
-
-For privacy-related questions or concerns:
-- **GitHub Issues**: [Create an issue](https://github.com/Zackriya-Solutions/meeting-minutes/issues)
-- **Email**: [Contact form](https://www.zackriya.com/service-interest-form/)
-- **Community**: [Discord](https://discord.gg/crRymMQBFH)
-
-## Open Source Commitment
-
-As an open-source project under MIT license, you can:
-- Review our complete privacy implementation
-- Modify data handling to meet your requirements
-- Deploy entirely on your own infrastructure
-- Contribute to privacy improvements
-
----
-
-*This privacy policy applies to Meetily v0.0.5 and later versions. For enterprise deployments, additional privacy controls may be available.*
+Material changes are published in this repository and described in release
+notes. Report privacy questions or issues at
+https://github.com/honzavoz/meetily-recordonly/issues.

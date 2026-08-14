@@ -477,7 +477,7 @@ export function SummaryPanel({
           <DialogHeader>
             <DialogTitle>External AI Prompt</DialogTitle>
             <DialogDescription>
-              Paste the copied prompt into ChatGPT, Claude, Gemini, or another AI tool. Then paste the Markdown result back into Meetily.
+              Paste the copied prompt into ChatGPT, Claude, Gemini, or another AI tool. Then paste the Markdown result back into Record Only.
             </DialogDescription>
           </DialogHeader>
 

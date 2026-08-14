@@ -1,35 +1,32 @@
-# Privacy policy for Meetily Google Meet Reminder
+# Privacy policy for Record Only - Meet Reminder
 
 Effective date: 2026-08-14
 
-Meetily Google Meet Reminder is a local companion to the Meetily desktop application. Its sole purpose is to detect whether the current Google Meet page has entered or left an active call and to notify the locally installed Meetily application.
+Record Only - Meet Reminder is a local companion to the Record Only desktop app. It detects whether a Google Meet page has entered or left an active call and sends that state to the app installed on the same Mac.
 
 ## Data processed
 
-The extension creates and processes only:
+The extension creates and processes:
 
-- a randomly generated identifier for the current call lifecycle;
-- the lifecycle event type: joined, left, heartbeat, or integration ping;
-- a sequence number;
-- the extension and protocol versions;
-- the event timestamp.
+- a random identifier for the current call lifecycle;
+- the lifecycle event type, sequence number, protocol versions, and event timestamp.
 
 The extension does not read, collect, transmit, or store meeting titles, meeting codes, URLs, participant identities, chat, captions, audio, video, microphone input, camera input, clipboard contents, or browsing history.
 
 ## Data use and sharing
 
-Lifecycle data is used only to show recording reminders in Meetily. It is sent through Chrome Native Messaging to the Meetily application installed on the same computer. It is not sent to Meetily's developers, advertising services, analytics services, or any other remote third party. It is not sold and is not used for advertising, profiling, credit decisions, or purposes unrelated to the extension's single purpose.
+Record Only uses lifecycle data to show a recording reminder. Chrome Native Messaging sends the data to the Record Only app on the same computer. The extension does not send data to the project maintainers, advertisers, analytics services, or other remote parties. It does not sell data or use it for advertising, profiling, credit decisions, or unrelated purposes.
 
-The extension temporarily uses Chrome session storage to match an open Google Meet tab with its call lifecycle. Chrome clears this session-scoped data automatically. Meetily does not persist Google Meet lifecycle identifiers in its meeting database or analytics.
+Chrome session storage holds the random call identifier while the tab remains open. Chrome clears this data with the session. Record Only does not store Google Meet lifecycle identifiers in its meeting database or analytics.
 
 ## Permissions
 
-- `meet.google.com` access is used only to determine whether a Google Meet call is active.
-- `nativeMessaging` is used only to communicate with the locally installed Meetily application.
-- `storage` is used only for temporary, session-scoped lifecycle state.
+- `meet.google.com` access checks whether a Google Meet call is active.
+- `nativeMessaging` communicates with the Record Only app installed on the same computer.
+- `storage` holds temporary session state for the current call lifecycle.
 
 ## Contact
 
-Questions and privacy requests can be submitted at https://github.com/honzavoz/meetily-recordonly/issues.
+Submit questions and privacy requests at https://github.com/honzavoz/meetily-recordonly/issues.
 
-Material changes to this policy will be published in this repository and included with an extension update.
+We publish material policy changes in this repository and include them with an extension update.

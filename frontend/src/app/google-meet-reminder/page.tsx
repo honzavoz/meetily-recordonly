@@ -60,7 +60,7 @@ export default function GoogleMeetReminderPage() {
             {state.kind === 'stop' ? <Square className="h-5 w-5" /> : <Video className="h-5 w-5" />}
           </div>
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Meetily</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">Record Only</p>
             <h1 className="mt-0.5 text-lg font-semibold leading-tight">
               {state.kind === 'stop' ? 'Google Meet ended' : state.kind === 'test' ? 'Reminder is working' : 'Google Meet is in progress'}
             </h1>
@@ -68,7 +68,7 @@ export default function GoogleMeetReminderPage() {
               {state.kind === 'stop'
                 ? 'Stop the recording and save it, or keep recording.'
                 : state.kind === 'test'
-                  ? 'Meetily can notify you when a call starts.'
+                  ? 'Record Only can notify you when a call starts.'
                   : 'Start recording before the conversation gets underway.'}
             </p>
           </div>
@@ -81,7 +81,7 @@ export default function GoogleMeetReminderPage() {
               onClick={() => run(() => invoke('open_meetily_from_reminder'))}
               className="shrink-0 font-semibold underline underline-offset-2"
             >
-              Open Meetily
+              Open Record Only
             </button>
           </div>
         )}

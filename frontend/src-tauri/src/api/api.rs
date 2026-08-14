@@ -1,7 +1,7 @@
 use log::{debug as log_debug, error as log_error, info as log_info, warn as log_warn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tauri::{AppHandle, Runtime};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_store::StoreExt;
 
 use crate::{
@@ -1331,6 +1331,41 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
     match result {
         Ok(_) => Ok(()),
         Err(e) => Err(format!("Failed to open URL: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn open_legal_notices<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    use std::process::Command;
+
+    let notices_path = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("Failed to locate application resources: {error}"))?
+        .join("licenses/THIRD_PARTY_NOTICES.md");
+
+    if !notices_path.is_file() {
+        return Err("Bundled license notices are missing".to_string());
+    }
+
+    let status = if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", "start", ""])
+            .arg(&notices_path)
+            .status()
+    } else if cfg!(target_os = "macos") {
+        Command::new("open").arg(&notices_path).status()
+    } else {
+        Command::new("xdg-open").arg(&notices_path).status()
+    }
+    .map_err(|error| format!("Failed to open license notices: {error}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "The system viewer could not open the bundled license notices (status: {status})"
+        ))
     }
 }
 

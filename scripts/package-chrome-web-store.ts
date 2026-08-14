@@ -9,7 +9,7 @@ const manifest = await Bun.file(join(extensionDirectory, 'manifest.json')).json(
 const artifactDirectory = join(repositoryRoot, 'artifacts', 'chrome-web-store');
 const archive = join(
   artifactDirectory,
-  `meetily-google-meet-reminder-${manifest.version}.zip`,
+  `record-only-meet-reminder-${manifest.version}.zip`,
 );
 
 async function filesBelow(directory: string): Promise<string[]> {
