@@ -171,7 +171,7 @@ impl SummaryProcessesRepository {
             UPDATE summary_processes
             SET
                 status = 'failed',
-                error = 'Summary generation was interrupted when Meetily exited',
+                error = 'Summary generation was interrupted when Record Only exited',
                 updated_at = ?,
                 end_time = ?,
                 result = COALESCE(result_backup, result),
