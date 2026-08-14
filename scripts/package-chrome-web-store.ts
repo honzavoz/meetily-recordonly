@@ -1,5 +1,16 @@
 import { execFileSync } from 'node:child_process';
-import { mkdir, readdir, rm, stat, utimes } from 'node:fs/promises';
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -12,38 +23,60 @@ const archive = join(
   `record-only-meet-reminder-${manifest.version}.zip`,
 );
 
-async function filesBelow(directory: string): Promise<string[]> {
+async function filesBelow(root: string, directory = root): Promise<string[]> {
   const entries = await readdir(directory);
   const files: string[] = [];
   for (const entry of entries.sort()) {
     const absolute = join(directory, entry);
     if ((await stat(absolute)).isDirectory()) {
-      files.push(...await filesBelow(absolute));
+      files.push(...await filesBelow(root, absolute));
     } else {
-      files.push(relative(extensionDirectory, absolute));
+      files.push(relative(root, absolute));
     }
   }
   return files;
 }
 
 await mkdir(artifactDirectory, { recursive: true });
-await rm(archive, { force: true });
+const stagingRoot = await mkdtemp(join(artifactDirectory, '.store-package-'));
+const stagingDirectory = join(stagingRoot, 'extension');
+const stagedArchive = join(stagingRoot, basename(archive));
 
-execFileSync(
-  'node',
-  [join(repositoryRoot, 'scripts', 'verify-chrome-extension.js'), extensionDirectory],
-  { cwd: repositoryRoot, stdio: 'inherit' },
-);
+try {
+  execFileSync(
+    'node',
+    [join(repositoryRoot, 'scripts', 'verify-chrome-extension.js'), extensionDirectory],
+    { cwd: repositoryRoot, stdio: 'inherit' },
+  );
+  await cp(extensionDirectory, stagingDirectory, { recursive: true });
+  const stagedManifestPath = join(stagingDirectory, 'manifest.json');
+  const stagedManifest = JSON.parse(await readFile(stagedManifestPath, 'utf8'));
+  delete stagedManifest.key;
+  await writeFile(stagedManifestPath, `${JSON.stringify(stagedManifest, null, 2)}\n`);
 
-const files = await filesBelow(extensionDirectory);
-const fixedDate = new Date('2020-01-01T00:00:00.000Z');
-for (const file of files) {
-  await utimes(join(extensionDirectory, file), fixedDate, fixedDate);
+  execFileSync(
+    'node',
+    [
+      join(repositoryRoot, 'scripts', 'verify-chrome-extension.js'),
+      '--store',
+      stagingDirectory,
+    ],
+    { cwd: repositoryRoot, stdio: 'inherit' },
+  );
+
+  const files = await filesBelow(stagingDirectory);
+  const fixedDate = new Date('2020-01-01T00:00:00.000Z');
+  for (const file of files) {
+    await utimes(join(stagingDirectory, file), fixedDate, fixedDate);
+  }
+
+  execFileSync('zip', ['-X', '-q', stagedArchive, ...files], {
+    cwd: stagingDirectory,
+    env: { ...process.env, TZ: 'UTC' },
+  });
+  await rename(stagedArchive, archive);
+  console.log(`Chrome Web Store package: ${relative(repositoryRoot, archive)}`);
+  console.log(`Files: ${files.length}; version: ${manifest.version}`);
+} finally {
+  await rm(stagingRoot, { recursive: true, force: true });
 }
-
-execFileSync('zip', ['-X', '-q', archive, ...files], {
-  cwd: extensionDirectory,
-  env: { ...process.env, TZ: 'UTC' },
-});
-console.log(`Chrome Web Store package: ${relative(repositoryRoot, archive)}`);
-console.log(`Files: ${files.length}; version: ${manifest.version}`);

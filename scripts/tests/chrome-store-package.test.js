@@ -37,3 +37,34 @@ test('Store validation forbids key while development validation requires it', (t
     { cwd: repositoryRoot, stdio: 'pipe' },
   );
 });
+
+test('Store ZIP omits key without changing the development manifest', () => {
+  execFileSync('bun', ['scripts/build-chrome-extension.ts'], {
+    cwd: repositoryRoot,
+    stdio: 'pipe',
+  });
+  const developmentManifestPath = resolve(
+    repositoryRoot,
+    'chrome-extension/dist/manifest.json',
+  );
+  const developmentBefore = readFileSync(developmentManifestPath, 'utf8');
+  const developmentManifest = JSON.parse(developmentBefore);
+  assert.equal(typeof developmentManifest.key, 'string');
+
+  execFileSync('bun', ['scripts/package-chrome-web-store.ts'], {
+    cwd: repositoryRoot,
+    stdio: 'pipe',
+  });
+  const archive = resolve(
+    repositoryRoot,
+    `artifacts/chrome-web-store/record-only-meet-reminder-${developmentManifest.version}.zip`,
+  );
+  const packagedManifest = JSON.parse(execFileSync(
+    'unzip',
+    ['-p', archive, 'manifest.json'],
+    { encoding: 'utf8' },
+  ));
+
+  assert.equal(Object.hasOwn(packagedManifest, 'key'), false);
+  assert.equal(readFileSync(developmentManifestPath, 'utf8'), developmentBefore);
+});
