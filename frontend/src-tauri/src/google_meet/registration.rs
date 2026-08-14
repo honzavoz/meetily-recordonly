@@ -5,10 +5,10 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub const NATIVE_HOST_NAME: &str = "cz.honzavoz.meetily.recordonly.google_meet";
-pub const EXTENSION_ID: &str = "fonilmfiddnidgjpcijiocffkbbeaddo";
-pub const EXTENSION_ORIGIN: &str = "chrome-extension://fonilmfiddnidgjpcijiocffkbbeaddo/";
+pub const EXTENSION_ID: &str = "mojclipfmoooddobmohinlnlpmnpjmjf";
+pub const EXTENSION_ORIGIN: &str = "chrome-extension://mojclipfmoooddobmohinlnlpmnpjmjf/";
 pub const CHROME_WEB_STORE_URL: &str =
-    "https://chromewebstore.google.com/detail/fonilmfiddnidgjpcijiocffkbbeaddo";
+    "https://chromewebstore.google.com/detail/mojclipfmoooddobmohinlnlpmnpjmjf";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

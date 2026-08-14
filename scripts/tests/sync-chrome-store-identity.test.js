@@ -7,10 +7,7 @@ import test from 'node:test';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const syncScript = resolve(repositoryRoot, 'scripts/sync-chrome-store-identity.js');
-const assignedKey = JSON.parse(readFileSync(
-  resolve(repositoryRoot, 'chrome-extension/manifest.json'),
-  'utf8',
-)).key;
+const assignedKey = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtoICCR4byemIhY4JCAkpT2sg3gFdE0kSsiF9R/cPpPM5AT+jOczUKB3jT3t2rQ8jiwcdqb8/p1JrzUfvsrN8YrpO0/f992Jb5gag/rB9zriAXprlW1LSO4A5ilYsLIFLSAm5YVqlLbaN95NaURaap7W7ZA2pZXxNoywdjMqUkKnjonDBq2QxipRr/Je4jCLnP4l5OvmZcRCIsX11GHqP+jL5nIZn8AplBQGbXuSwrNIhoHOZR3harpJdkhDLHap6iqQGiJO8WYoZHOTd+OBeejl6NiI2u8ibI5ZR7Xe68by4KdAaTduK1Cwe/Xjvhyk1PR4PwRYxv5eEjFyOv5CsEwIDAQAB';
 const assignedId = 'fonilmfiddnidgjpcijiocffkbbeaddo';
 
 function makeFixture() {
