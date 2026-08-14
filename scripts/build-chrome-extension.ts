@@ -28,6 +28,11 @@ try {
   const manifest = JSON.parse(await readFile(join(extensionRoot, 'manifest.json'), 'utf8'));
   await Bun.write(join(stagingDirectory, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   await cp(join(extensionRoot, 'icons'), join(stagingDirectory, 'icons'), { recursive: true });
+  await cp(join(repositoryRoot, 'LICENSE.md'), join(stagingDirectory, 'LICENSE.md'));
+  await cp(
+    join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'),
+    join(stagingDirectory, 'THIRD_PARTY_NOTICES.md'),
+  );
 
   await rm(outputDirectory, { recursive: true, force: true });
   await rename(stagingDirectory, outputDirectory);

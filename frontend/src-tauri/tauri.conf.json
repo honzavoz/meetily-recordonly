@@ -107,7 +107,10 @@
         ],
         "resources": {
             "templates/*.json": "templates/",
-            "../../chrome-extension/dist/*": "chrome-extension/"
+            "../../chrome-extension/dist/*": "chrome-extension/",
+            "../../LICENSE.md": "licenses/LICENSE.md",
+            "../../THIRD_PARTY_NOTICES.md": "licenses/THIRD_PARTY_NOTICES.md",
+            "../../third-party/ffmpeg/*": "licenses/ffmpeg/"
         },
         "externalBin": [
             "binaries/llama-helper",
