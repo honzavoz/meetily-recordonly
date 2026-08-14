@@ -2,7 +2,16 @@
 
 ## First-upload identity step
 
-After uploading the initial ZIP, open Package > View public key. Before submitting for review, replace the development `manifest.key` with that public key, update Record Only's native-host allowed origin and Web Store URL to the dashboard Item ID, increment the extension version, rebuild the ZIP, and upload it as the final package. Verify that the dashboard Item ID matches the locally loaded extension ID.
+Upload the initial ZIP as a draft only, then open **Package > View public key**. Do not submit it for review yet. Synchronize the dashboard Item ID, public key, and next package version in one validated operation:
+
+```bash
+node scripts/sync-chrome-store-identity.js \
+  --item-id '<dashboard-item-id>' \
+  --public-key '<dashboard-public-key>' \
+  --extension-version '0.1.1'
+```
+
+The command rejects a mismatched public key/Item ID or a non-increasing version before changing either source file. Then run `node scripts/verify-chrome-store-identity.js`, rebuild the ZIP, and upload it as the final draft package. Verify that the dashboard Item ID matches the locally loaded extension ID before submission.
 
 ## Single purpose
 

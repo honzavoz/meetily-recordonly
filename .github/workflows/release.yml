@@ -46,6 +46,7 @@ jobs:
           bun scripts/build-chrome-extension.ts
           node scripts/verify-chrome-extension.js chrome-extension/dist
           node scripts/verify-chrome-store-identity.js
+          node scripts/verify-chrome-store-listing.js
           bun scripts/package-chrome-web-store.ts
 
       - name: Validate version consistency

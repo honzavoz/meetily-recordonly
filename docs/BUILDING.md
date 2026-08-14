@@ -8,7 +8,7 @@ The transition release keeps the technical macOS bundle name `Meetily.app`, exec
 
 Record Only includes a privacy-limited Chrome extension that detects only whether a Google Meet call has started or ended. It does not read or send participant names, meeting titles, chat, captions, audio, video, the meeting URL, or its meeting code.
 
-User setup:
+User setup after the unlisted Chrome Web Store item is published:
 
 1. Install and open the current Record Only application.
 2. Open **Settings → General → Google Meet reminder** and select **Install in Chrome**.
@@ -23,7 +23,7 @@ Chrome communicates with Record Only through the compatibility native-host manif
 
 Disabling the integration removes only the manifest owned by the current Record Only installation. To uninstall completely, disable the integration in Record Only and remove the extension in Chrome.
 
-For local extension development only, run `bun scripts/build-chrome-extension.ts`, open `chrome://extensions`, enable Developer mode, and load `chrome-extension/dist` as an unpacked extension. End users should install the reviewed Chrome Web Store build instead.
+Until the unlisted Store item is live, the **Install in Chrome** URL is intentionally treated as unavailable by the release gate. For local extension development only, run `bun scripts/build-chrome-extension.ts`, open `chrome://extensions`, enable Developer mode, and load `chrome-extension/dist` as an unpacked extension. Once published, end users should install the reviewed Chrome Web Store build instead.
 
 Real-call acceptance test:
 

@@ -21,7 +21,7 @@ The transition release keeps the technical bundle name `Meetily.app`, executable
 
 ## Google Meet reminder
 
-Open **Settings > General > Google Meet reminder** and select **Install in Chrome**. The extension sends call start and end signals to the app through Chrome Native Messaging. It does not read meeting titles, participant names, chat, captions, audio, video, the meeting URL, or its meeting code.
+After the unlisted Chrome Web Store companion is published, open **Settings > General > Google Meet reminder** and select **Install in Chrome**. The extension sends call start and end signals to the app through Chrome Native Messaging. It does not read meeting titles, participant names, chat, captions, audio, video, the meeting URL, or its meeting code. Release automation now blocks future desktop releases unless the configured Store listing is publicly live.
 
 See [Building Record Only from Source](docs/BUILDING.md) for local extension development and acceptance tests.
 
