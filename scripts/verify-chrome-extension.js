@@ -7,13 +7,20 @@ function fail(file, rule) {
   throw new Error(`${file}: ${rule}`);
 }
 
-const directory = path.resolve(process.argv[2] || 'chrome-extension/dist');
+const args = process.argv.slice(2);
+const storeMode = args.includes('--store');
+const directoryArgument = args.find((argument) => argument !== '--store');
+const directory = path.resolve(directoryArgument || 'chrome-extension/dist');
 const manifestPath = path.join(directory, 'manifest.json');
 if (!fs.existsSync(manifestPath)) fail('manifest.json', 'file is missing');
 
 const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 if (manifest.manifest_version !== 3) fail('manifest.json', 'manifest_version must be 3');
-if (!/^[A-Za-z0-9+/]+=*$/.test(manifest.key || '')) fail('manifest.json', 'fixed extension key is missing');
+if (storeMode) {
+  if (Object.hasOwn(manifest, 'key')) fail('manifest.json', 'key is forbidden in Store packages');
+} else if (!/^[A-Za-z0-9+/]+=*$/.test(manifest.key || '')) {
+  fail('manifest.json', 'fixed extension key is missing');
+}
 
 const expectedPermissions = ['nativeMessaging', 'storage'];
 if (JSON.stringify([...(manifest.permissions || [])].sort()) !== JSON.stringify(expectedPermissions.sort())) {
