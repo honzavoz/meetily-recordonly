@@ -23,6 +23,10 @@ const releaseWorkflow = readFileSync(
   resolve(repositoryRoot, '.github/workflows/release.yml'),
   'utf8',
 );
+const ffmpegSigningKey = readFileSync(
+  resolve(repositoryRoot, 'third-party/ffmpeg/ffmpeg-devel.asc'),
+  'utf8',
+);
 
 function makeFixture(buildConfiguration, licenseText) {
   const directory = mkdtempSync(resolve(tmpdir(), 'record-only-ffmpeg-license-'));
@@ -96,8 +100,11 @@ test('build records a stable prefix and reuses only verified provenance', () => 
 });
 
 test('build cryptographically verifies the official FFmpeg release signature', () => {
+  assert.match(ffmpegSigningKey, /^-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n/);
   assert.match(buildScript, /FCF986EA15E6E293A5644F10B4322F04D67658D8/);
   assert.match(buildScript, /third-party\/ffmpeg\/ffmpeg-devel\.asc/);
+  assert.match(buildScript, /--import-options show-only --import/);
+  assert.doesNotMatch(buildScript, /--show-keys/);
   assert.match(buildScript, /gpg .*--verify/);
 });
 

@@ -70,16 +70,18 @@ verify_source_authenticity() {
   fi
 
   mkdir -m 0700 -p "$gnupg_home"
+  local key_listing
   local actual_fingerprint
-  actual_fingerprint=$(gpg --batch --homedir "$gnupg_home" --with-colons --show-keys "$signing_key" 2>/dev/null \
-    | awk -F: '$1 == "fpr" { print $10; exit }')
+  key_listing=$(gpg --batch --no-options --homedir "$gnupg_home" --with-colons \
+    --import-options show-only --import "$signing_key")
+  actual_fingerprint=$(printf '%s\n' "$key_listing" | awk -F: '$1 == "fpr" { print $10; exit }')
   if [[ "$actual_fingerprint" != "$expected_signing_fingerprint" ]]; then
     echo "FFmpeg signing key fingerprint mismatch: expected $expected_signing_fingerprint, got $actual_fingerprint" >&2
     return 1
   fi
 
-  gpg --batch --homedir "$gnupg_home" --import "$signing_key" >/dev/null 2>&1
-  gpg --batch --homedir "$gnupg_home" --verify "$signature" "$archive"
+  gpg --batch --no-options --homedir "$gnupg_home" --import "$signing_key" >/dev/null
+  gpg --batch --no-options --homedir "$gnupg_home" --verify "$signature" "$archive"
 }
 
 required_provenance=(
