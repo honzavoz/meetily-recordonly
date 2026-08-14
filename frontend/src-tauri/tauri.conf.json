@@ -110,7 +110,8 @@
             "../../chrome-extension/dist/*": "chrome-extension/",
             "../../LICENSE.md": "licenses/LICENSE.md",
             "../../THIRD_PARTY_NOTICES.md": "licenses/THIRD_PARTY_NOTICES.md",
-            "../../third-party/ffmpeg/*": "licenses/ffmpeg/"
+            "../../third-party/ffmpeg/*": "licenses/ffmpeg/",
+            "../../artifacts/ffmpeg-source/*": "licenses/ffmpeg/"
         },
         "externalBin": [
             "binaries/llama-helper",

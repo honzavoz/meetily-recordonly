@@ -181,6 +181,7 @@ jobs:
             const repo = context.repo.repo
             const expectedTag = `v${expectedVersion}`
             const { verifyUpdaterReleaseAssets } = require('./scripts/verify-updater-release-assets.js')
+            const { verifyFfmpegReleaseAssets } = require('./scripts/verify-ffmpeg-release-assets.js')
             const fs = require('node:fs')
             const path = require('node:path')
 
@@ -228,6 +229,37 @@ jobs:
               })
               return Buffer.from(response.data)
             }
+            const ffmpegVersion = fs.readFileSync('third-party/ffmpeg/VERSION.txt', 'utf8').trim()
+            const checksumManifest = fs.readFileSync('third-party/ffmpeg/SHA256SUMS', 'utf8')
+            const checksumMatch = checksumManifest.match(
+              new RegExp(`^([0-9a-f]{64})  ffmpeg-${ffmpegVersion.replaceAll('.', '\\.')}\\.tar\\.xz$`, 'mi')
+            )
+            if (!checksumMatch) {
+              throw new Error(`No reviewed checksum found for FFmpeg ${ffmpegVersion}`)
+            }
+            const ffmpegNames = [
+              `ffmpeg-${ffmpegVersion}.tar.xz`,
+              `ffmpeg-${ffmpegVersion}.tar.xz.asc`,
+              `FFmpeg-${ffmpegVersion}-LGPL-2.1.txt`,
+              `FFmpeg-${ffmpegVersion}-build-configuration.txt`,
+              `FFmpeg-${ffmpegVersion}-binary-version.txt`,
+              `FFmpeg-${ffmpegVersion}-buildconf.txt`,
+              `FFmpeg-${ffmpegVersion}-license-output.txt`,
+              `FFmpeg-${ffmpegVersion}-SHA256SUMS`,
+            ]
+            const ffmpegContents = new Map()
+            for (const name of ffmpegNames) {
+              const matchingAssets = assets.filter(asset => asset.name === name)
+              if (matchingAssets.length === 1) {
+                ffmpegContents.set(name, await downloadBytes(matchingAssets[0]))
+              }
+            }
+            const verifiedFfmpeg = verifyFfmpegReleaseAssets({
+              assets,
+              contents: ffmpegContents,
+              expectedVersion: ffmpegVersion,
+              expectedSha256: checksumMatch[1].toLowerCase(),
+            })
             const [manifestBytes, signatureBytes] = await Promise.all([
               downloadBytes(manifestAsset),
               downloadBytes(signatureAsset)
@@ -251,7 +283,7 @@ jobs:
             fs.writeFileSync(path.join(verificationDirectory, 'updater.app.tar.gz'), archiveBytes, { mode: 0o600 })
             fs.writeFileSync(path.join(verificationDirectory, 'updater.app.tar.gz.sig'), verifiedSignatureBytes, { mode: 0o600 })
 
-            core.info(`Verified ${assets.length} draft assets and latest.json for ${expectedVersion}`)
+            core.info(`Verified ${assets.length} draft assets, latest.json, and ${verifiedFfmpeg.assets.length} FFmpeg LGPL provenance assets for ${expectedVersion}`)
 
       - name: Install minisign verifier
         shell: bash

@@ -632,11 +632,24 @@ jobs:
           echo "Copied llama-helper to frontend/src-tauri/binaries/llama-helper-${TARGET}"
           ls -la frontend/src-tauri/binaries/
 
-      - name: Cache FFmpeg binary
+      - name: Cache reviewed FFmpeg binary and source provenance
+        if: contains(inputs.platform, 'macos')
         uses: actions/cache@v6
         with:
-          path: frontend/src-tauri/binaries/ffmpeg-*
-          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}    
+          path: |
+            frontend/src-tauri/binaries/ffmpeg-*
+            artifacts/ffmpeg-source/*
+          key: ${{ runner.os }}-${{ inputs.target }}-ffmpeg-lgpl-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs', 'scripts/build-ffmpeg-lgpl.sh', 'scripts/verify-ffmpeg-license.js', 'third-party/ffmpeg/VERSION.txt', 'third-party/ffmpeg/SHA256SUMS', 'third-party/ffmpeg/ffmpeg-devel.asc') }}
+
+      - name: Install FFmpeg source signature verifier
+        if: contains(inputs.platform, 'macos')
+        shell: bash
+        run: brew list gnupg >/dev/null 2>&1 || brew install gnupg
+
+      - name: Build and verify reviewed LGPL FFmpeg
+        if: contains(inputs.platform, 'macos')
+        shell: bash
+        run: scripts/build-ffmpeg-lgpl.sh "${{ inputs.target }}"
 
       - name: Build with Tauri (Apple signed)
         if: inputs.sign-binaries
@@ -680,6 +693,45 @@ jobs:
           releaseName: ${{ inputs.release-id && format('v{0}', steps.get-version.outputs.version) || '' }}
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
+
+      - name: Upload FFmpeg source and LGPL provenance
+        if: ${{ inputs.release-id != '' && contains(inputs.platform, 'macos') }}
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ inputs.release-id }}
+        with:
+          script: |
+            const fs = require('node:fs')
+            const path = require('node:path')
+            const version = fs.readFileSync('third-party/ffmpeg/VERSION.txt', 'utf8').trim()
+            const source = `ffmpeg-${version}.tar.xz`
+            const provenanceDirectory = 'artifacts/ffmpeg-source'
+            const uploads = [
+              [source, path.join(provenanceDirectory, source)],
+              [`${source}.asc`, path.join(provenanceDirectory, `${source}.asc`)],
+              [`FFmpeg-${version}-LGPL-2.1.txt`, path.join(provenanceDirectory, 'COPYING.LGPLv2.1')],
+              [`FFmpeg-${version}-build-configuration.txt`, path.join(provenanceDirectory, 'BUILD_CONFIGURATION.txt')],
+              [`FFmpeg-${version}-binary-version.txt`, path.join(provenanceDirectory, 'FFMPEG_VERSION.txt')],
+              [`FFmpeg-${version}-buildconf.txt`, path.join(provenanceDirectory, 'FFMPEG_BUILDCONF.txt')],
+              [`FFmpeg-${version}-license-output.txt`, path.join(provenanceDirectory, 'FFMPEG_LICENSE_OUTPUT.txt')],
+              [`FFmpeg-${version}-SHA256SUMS`, path.join(provenanceDirectory, 'SHA256SUMS')],
+            ]
+
+            for (const [name, file] of uploads) {
+              const data = fs.readFileSync(file)
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: Number(process.env.RELEASE_ID),
+                name,
+                data,
+                headers: {
+                  'content-type': 'application/octet-stream',
+                  'content-length': data.length,
+                },
+              })
+              core.info(`Uploaded ${name} (${data.length} bytes)`)
+            }
 
       - name: Verify signed and notarized macOS app
         if: contains(inputs.platform, 'macos') && inputs.sign-binaries

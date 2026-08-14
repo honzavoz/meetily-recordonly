@@ -20,6 +20,10 @@ test('desktop bundle maps the project and FFmpeg license notices into resources'
     tauriConfig.bundle.resources['../../third-party/ffmpeg/*'],
     'licenses/ffmpeg/',
   );
+  assert.equal(
+    tauriConfig.bundle.resources['../../artifacts/ffmpeg-source/*'],
+    'licenses/ffmpeg/',
+  );
 });
 
 test('Chrome extension build contains the project and third-party notices', () => {

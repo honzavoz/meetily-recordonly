@@ -174,14 +174,22 @@ jobs:
           echo "Copied llama-helper to frontend/src-tauri/binaries/"
           ls -la frontend/src-tauri/binaries/
 
-      - name: Test Rust workspace
-        run: cargo test --workspace --locked
-
-      - name: Cache FFmpeg binary
+      - name: Cache reviewed FFmpeg binary and source provenance
         uses: actions/cache@v6
         with:
-          path: frontend/src-tauri/binaries/ffmpeg-*
-          key: ${{ runner.os }}-ffmpeg-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs') }}
+          path: |
+            frontend/src-tauri/binaries/ffmpeg-*
+            artifacts/ffmpeg-source/*
+          key: ${{ runner.os }}-aarch64-apple-darwin-ffmpeg-lgpl-${{ hashFiles('frontend/src-tauri/build.rs', 'frontend/src-tauri/build/ffmpeg.rs', 'scripts/build-ffmpeg-lgpl.sh', 'scripts/verify-ffmpeg-license.js', 'third-party/ffmpeg/VERSION.txt', 'third-party/ffmpeg/SHA256SUMS', 'third-party/ffmpeg/ffmpeg-devel.asc') }}
+
+      - name: Install FFmpeg source signature verifier
+        run: brew list gnupg >/dev/null 2>&1 || brew install gnupg
+
+      - name: Build and verify reviewed LGPL FFmpeg
+        run: scripts/build-ffmpeg-lgpl.sh "aarch64-apple-darwin"
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --locked
 
       - name: Build Tauri app (with code signing)
         if: ${{ inputs.sign-build }}
