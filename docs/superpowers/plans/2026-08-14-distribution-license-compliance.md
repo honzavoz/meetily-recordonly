@@ -308,4 +308,3 @@ Run the GitHub `Release` workflow for the exact pushed SHA. Report the workflow 
 - [ ] **Step 7: Verify the published replacement**
 
 Download `v0.4.15`, verify signature, inspect resources, validate bundled FFmpeg, verify source assets, and exercise the in-app update. Only after that may the Chrome Web Store package continue to upload/review.
-

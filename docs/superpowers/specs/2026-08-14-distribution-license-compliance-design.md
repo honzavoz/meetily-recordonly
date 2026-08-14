@@ -50,4 +50,3 @@ Version `0.4.14` remains historical evidence but must not be treated as the pref
 - Legal registration of the Record Only name or logo.
 - Contacting Zackriya Solutions or accepting third-party legal agreements.
 - Windows and Linux binary publication before equivalent reproducible FFmpeg builds and artifact checks exist.
-
