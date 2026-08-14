@@ -6,6 +6,7 @@ const { verifyUpdaterReleaseAssets } = require('../verify-updater-release-assets
 
 const expected = {
   expectedVersion: '0.4.5',
+  expectedFfmpegVersion: '8.0.3',
   expectedOwner: 'honzavoz',
   expectedRepo: 'meetily-recordonly',
   expectedTag: 'v0.4.5'
@@ -13,6 +14,16 @@ const expected = {
 const signature = 'fixture-signature'
 const archiveName = 'Meetily_0.4.5_aarch64.app.tar.gz'
 const archiveUrl = `https://github.com/honzavoz/meetily-recordonly/releases/download/v0.4.5/${archiveName}`
+const ffmpegAssetNames = [
+  'ffmpeg-8.0.3.tar.xz',
+  'ffmpeg-8.0.3.tar.xz.asc',
+  'FFmpeg-8.0.3-LGPL-2.1.txt',
+  'FFmpeg-8.0.3-build-configuration.txt',
+  'FFmpeg-8.0.3-binary-version.txt',
+  'FFmpeg-8.0.3-buildconf.txt',
+  'FFmpeg-8.0.3-license-output.txt',
+  'FFmpeg-8.0.3-SHA256SUMS',
+]
 
 function fixture() {
   return {
@@ -21,7 +32,12 @@ function fixture() {
       { id: 1, name: 'Meetily_0.4.5_aarch64.dmg', browser_download_url: 'https://example.invalid/dmg' },
       { id: 2, name: archiveName, browser_download_url: archiveUrl },
       { id: 3, name: `${archiveName}.sig`, browser_download_url: 'https://example.invalid/sig' },
-      { id: 4, name: 'latest.json', browser_download_url: 'https://example.invalid/latest' }
+      { id: 4, name: 'latest.json', browser_download_url: 'https://example.invalid/latest' },
+      ...ffmpegAssetNames.map((name, index) => ({
+        id: index + 5,
+        name,
+        browser_download_url: `https://example.invalid/${name}`
+      }))
     ],
     manifestText: JSON.stringify({
       version: '0.4.5',
@@ -41,6 +57,7 @@ function expectFailure(label, mutate, pattern) {
 
 const verified = verifyUpdaterReleaseAssets(fixture())
 assert.equal(verified.archive.name, archiveName)
+assert.equal(verified.ffmpegAssets.length, ffmpegAssetNames.length)
 
 const draftFixture = fixture()
 draftFixture.assets.find(asset => asset.name === archiveName).browser_download_url =
@@ -136,5 +153,17 @@ expectFailure('wrong archive architecture', input => {
 expectFailure('wrong DMG architecture', input => {
   input.assets.find(asset => asset.name.endsWith('.dmg')).name = 'Meetily_0.4.5_x64.dmg'
 }, /aarch64 DMG/i)
+
+expectFailure('missing FFmpeg source archive', input => {
+  input.assets = input.assets.filter(asset => asset.name !== 'ffmpeg-8.0.3.tar.xz')
+}, /FFmpeg source archive/i)
+
+expectFailure('missing FFmpeg build configuration', input => {
+  input.assets = input.assets.filter(asset => asset.name !== 'FFmpeg-8.0.3-build-configuration.txt')
+}, /FFmpeg build configuration/i)
+
+expectFailure('duplicate FFmpeg source archive', input => {
+  input.assets.push({ id: 99, name: 'ffmpeg-8.0.3.tar.xz' })
+}, /exactly one.*FFmpeg source archive/i)
 
 console.log('PASS: updater release asset verifier fixtures')

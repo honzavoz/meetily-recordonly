@@ -29,12 +29,21 @@ async function filesBelow(directory: string): Promise<string[]> {
 await mkdir(artifactDirectory, { recursive: true });
 await rm(archive, { force: true });
 
+execFileSync(
+  'node',
+  [join(repositoryRoot, 'scripts', 'verify-chrome-extension.js'), extensionDirectory],
+  { cwd: repositoryRoot, stdio: 'inherit' },
+);
+
 const files = await filesBelow(extensionDirectory);
 const fixedDate = new Date('2020-01-01T00:00:00.000Z');
 for (const file of files) {
   await utimes(join(extensionDirectory, file), fixedDate, fixedDate);
 }
 
-execFileSync('zip', ['-X', '-q', archive, ...files], { cwd: extensionDirectory });
+execFileSync('zip', ['-X', '-q', archive, ...files], {
+  cwd: extensionDirectory,
+  env: { ...process.env, TZ: 'UTC' },
+});
 console.log(`Chrome Web Store package: ${relative(repositoryRoot, archive)}`);
 console.log(`Files: ${files.length}; version: ${manifest.version}`);

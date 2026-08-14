@@ -15,12 +15,16 @@ function verifyUpdaterReleaseAssets(input) {
     manifestText,
     signatureText,
     expectedVersion,
+    expectedFfmpegVersion,
     expectedOwner,
     expectedRepo,
     expectedTag
   } = input
 
   if (!Array.isArray(assets)) throw new Error('Release assets must be an array')
+  if (!/^\d+\.\d+\.\d+$/.test(expectedFfmpegVersion || '')) {
+    throw new Error('Expected FFmpeg version must use strict X.Y.Z format')
+  }
 
   const archive = exactlyOne(assets, asset => asset.name.endsWith('.app.tar.gz'), 'updater archive')
   if (!archive.name.toLowerCase().includes('aarch64')) {
@@ -37,6 +41,19 @@ function verifyUpdaterReleaseAssets(input) {
     throw new Error(`Expected an aarch64 DMG; got ${dmg.name}`)
   }
   const manifestAsset = exactlyOne(assets, asset => asset.name === 'latest.json', 'latest.json asset')
+  const ffmpegAssetContracts = [
+    [`ffmpeg-${expectedFfmpegVersion}.tar.xz`, 'FFmpeg source archive'],
+    [`ffmpeg-${expectedFfmpegVersion}.tar.xz.asc`, 'FFmpeg detached source signature'],
+    [`FFmpeg-${expectedFfmpegVersion}-LGPL-2.1.txt`, 'FFmpeg LGPL license'],
+    [`FFmpeg-${expectedFfmpegVersion}-build-configuration.txt`, 'FFmpeg build configuration'],
+    [`FFmpeg-${expectedFfmpegVersion}-binary-version.txt`, 'FFmpeg binary version provenance'],
+    [`FFmpeg-${expectedFfmpegVersion}-buildconf.txt`, 'FFmpeg buildconf provenance'],
+    [`FFmpeg-${expectedFfmpegVersion}-license-output.txt`, 'FFmpeg license output provenance'],
+    [`FFmpeg-${expectedFfmpegVersion}-SHA256SUMS`, 'FFmpeg checksum manifest'],
+  ]
+  const ffmpegAssets = ffmpegAssetContracts.map(([name, label]) =>
+    exactlyOne(assets, asset => asset.name === name, label)
+  )
 
   const expectedUrlPrefix = `https://github.com/${expectedOwner}/${expectedRepo}/releases/download/${expectedTag}/`
   const expectedArchiveUrl = `${expectedUrlPrefix}${archive.name}`
@@ -77,7 +94,7 @@ function verifyUpdaterReleaseAssets(input) {
     verifyPlatform('darwin-aarch64-app', platforms['darwin-aarch64-app'])
   }
 
-  return { archive, signature, dmg, manifestAsset }
+  return { archive, signature, dmg, manifestAsset, ffmpegAssets }
 }
 
 module.exports = { verifyUpdaterReleaseAssets }

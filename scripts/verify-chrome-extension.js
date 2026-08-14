@@ -23,6 +23,19 @@ if (JSON.stringify(manifest.host_permissions) !== JSON.stringify(['https://meet.
   fail('manifest.json', 'host_permissions must contain only Google Meet');
 }
 
+const requiredNotices = {
+  'LICENSE.md': [/MIT License/, /Copyright \(c\) 2024 Zackriya Solutions/],
+  'THIRD_PARTY_NOTICES.md': [/Meetily Community Edition/, /GNU Lesser General Public License 2\.1 or later/],
+};
+for (const [filename, patterns] of Object.entries(requiredNotices)) {
+  const filePath = path.join(directory, filename);
+  if (!fs.existsSync(filePath)) fail(filename, 'file is missing');
+  const contents = fs.readFileSync(filePath, 'utf8');
+  for (const pattern of patterns) {
+    if (!pattern.test(contents)) fail(filename, `required notice content is missing: ${pattern}`);
+  }
+}
+
 const expectedIcons = {
   16: 'icons/icon16.png',
   32: 'icons/icon32.png',

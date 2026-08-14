@@ -232,6 +232,18 @@ jobs:
           projectPath: frontend
           args: --target aarch64-apple-darwin --bundles app ${{ steps.build-profile.outputs.args }}
 
+      - name: Verify license-compliant macOS app bundle
+        shell: bash
+        run: |
+          APP_ROOT="target/aarch64-apple-darwin/${{ steps.build-profile.outputs.profile }}/bundle/macos"
+          APP_COUNT=$(find "$APP_ROOT" -maxdepth 1 -name "*.app" -type d | wc -l | tr -d ' ')
+          if [[ "$APP_COUNT" != "1" ]]; then
+            echo "License artifact verification requires exactly one app bundle; found $APP_COUNT" >&2
+            exit 1
+          fi
+          APP_PATH=$(find "$APP_ROOT" -maxdepth 1 -name "*.app" -type d | head -1)
+          node scripts/verify-license-artifact.js "$APP_PATH"
+
       - name: Verify build artifacts
         run: |
           echo "Build artifacts:"

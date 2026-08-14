@@ -84,7 +84,7 @@ jobs:
             const owner = context.repo.owner
             const repo = context.repo.repo
             const tag = `v${{ steps.get-version.outputs.version }}`
-            const releaseName = `Meetily v${{ steps.get-version.outputs.version }}`
+            const releaseName = `Record Only v${{ steps.get-version.outputs.version }}`
             const releases = await github.paginate(github.rest.repos.listReleases, {
               owner,
               repo,
@@ -269,6 +269,7 @@ jobs:
               manifestText: manifestBytes.toString('utf8'),
               signatureText: signatureBytes.toString('utf8'),
               expectedVersion,
+              expectedFfmpegVersion: ffmpegVersion,
               expectedOwner: owner,
               expectedRepo: repo,
               expectedTag
@@ -313,6 +314,20 @@ jobs:
           minisign -Vm "$RUNNER_TEMP/updater-verification/updater.app.tar.gz" \
             -x "$RUNNER_TEMP/updater-verification/updater.app.tar.gz.minisig" \
             -p "$RUNNER_TEMP/updater-verification/updater.pub"
+
+      - name: Verify downloaded app license artifact
+        shell: bash
+        run: |
+          EXTRACT_ROOT="$RUNNER_TEMP/updater-verification/extracted"
+          mkdir -p "$EXTRACT_ROOT"
+          tar -xzf "$RUNNER_TEMP/updater-verification/updater.app.tar.gz" -C "$EXTRACT_ROOT"
+          APP_COUNT=$(find "$EXTRACT_ROOT" -maxdepth 2 -name "*.app" -type d | wc -l | tr -d ' ')
+          if [[ "$APP_COUNT" != "1" ]]; then
+            echo "Downloaded updater must contain exactly one app bundle; found $APP_COUNT" >&2
+            exit 1
+          fi
+          APP_PATH=$(find "$EXTRACT_ROOT" -maxdepth 2 -name "*.app" -type d | head -1)
+          node scripts/verify-license-artifact.js "$APP_PATH" --skip-binary-execution
 
       - name: Publish verified release
         uses: actions/github-script@v7

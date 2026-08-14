@@ -694,6 +694,19 @@ jobs:
           releaseId: ${{ inputs.release-id }}
           args: ${{ inputs.build-args }} ${{ steps.build-features.outputs.features }}
 
+      - name: Verify license-compliant macOS app bundle
+        if: contains(inputs.platform, 'macos')
+        shell: bash
+        run: |
+          APP_ROOT="target/${{ inputs.target }}/${{ steps.build-profile.outputs.profile }}/bundle/macos"
+          APP_COUNT=$(find "$APP_ROOT" -maxdepth 1 -name "*.app" -type d | wc -l | tr -d ' ')
+          if [[ "$APP_COUNT" != "1" ]]; then
+            echo "License artifact verification requires exactly one app bundle; found $APP_COUNT" >&2
+            exit 1
+          fi
+          APP_PATH=$(find "$APP_ROOT" -maxdepth 1 -name "*.app" -type d | head -1)
+          node scripts/verify-license-artifact.js "$APP_PATH"
+
       - name: Upload FFmpeg source and LGPL provenance
         if: ${{ inputs.release-id != '' && contains(inputs.platform, 'macos') }}
         uses: actions/github-script@v7
