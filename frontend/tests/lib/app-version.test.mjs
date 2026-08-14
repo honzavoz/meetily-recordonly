@@ -8,17 +8,17 @@ import {
 } from "../../src/lib/app-version.ts";
 
 describe("application version", () => {
-  test("packages Meetily 0.4.14 without changing its bundle identity", () => {
+  test("packages Record Only 0.4.15 without changing its updater identity", () => {
     const tauriConfig = JSON.parse(readFileSync(new URL("../../src-tauri/tauri.conf.json", import.meta.url), "utf8"));
     const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
     const cargoToml = readFileSync(new URL("../../src-tauri/Cargo.toml", import.meta.url), "utf8");
 
     assert.equal(tauriConfig.productName, "Meetily");
-    assert.equal(tauriConfig.app.windows[0].title, "Meetily");
+    assert.equal(tauriConfig.app.windows[0].title, "Record Only");
     assert.equal(tauriConfig.identifier, "cz.honzavoz.meetily.recordonly");
-    assert.equal(tauriConfig.version, "0.4.14");
-    assert.equal(packageJson.version, "0.4.14");
-    assert.match(cargoToml, /^version = "0\.4\.14"$/m);
+    assert.equal(tauriConfig.version, "0.4.15");
+    assert.equal(packageJson.version, "0.4.15");
+    assert.match(cargoToml, /^version = "0\.4\.15"$/m);
   });
 
   test("normalizes version text for display", () => {

@@ -30,9 +30,10 @@ describe('release QA completion contracts', () => {
     expect(packageJson.scripts.lint).toBe('eslint .');
   });
 
-  test('keeps the About surface branded only as Meetily', () => {
-    expect(aboutSource).toContain('Meetily — private meeting notes on your Mac.');
-    expect(aboutSource).not.toContain('Zackriya');
+  test('keeps the About surface independently branded with upstream attribution', () => {
+    expect(aboutSource).toContain('Record Only');
+    expect(aboutSource).toContain('independent fork of Meetily Community Edition');
+    expect(aboutSource).toContain('not endorsed by Zackriya Solutions');
   });
 
   test('runs frontend and Rust quality gates before macOS packaging', () => {
