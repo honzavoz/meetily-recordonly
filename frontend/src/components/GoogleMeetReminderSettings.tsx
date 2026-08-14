@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 
 import {
   GoogleMeetIntegrationStatus,
+  integrationSetupAction,
   integrationStatusLabel,
   normalizeReminderError,
 } from '@/lib/google-meet-reminder';
@@ -73,6 +74,7 @@ export function GoogleMeetReminderSettings() {
 
   const label = status ? integrationStatusLabel(status) : 'Checking…';
   const connected = label === 'Connected';
+  const setupAction = status ? integrationSetupAction(status) : null;
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
@@ -85,7 +87,7 @@ export function GoogleMeetReminderSettings() {
             <h3 className="text-lg font-semibold text-gray-900">Google Meet reminder</h3>
             <p className="mt-1 max-w-xl text-sm text-gray-600">
               Remind me to start recording when I join a Google Meet call in Chrome.
-              Meetily receives only call start and end signals—never meeting content.
+              Record Only receives only call start and end signals, never meeting content.
             </p>
           </div>
         </div>
@@ -103,13 +105,13 @@ export function GoogleMeetReminderSettings() {
         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${connected ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
           {label}
         </span>
-        {!status?.extensionPath && (
+        {setupAction?.visible && (
           <button
             disabled={busy}
             onClick={install}
             className="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-60"
           >
-            Set up Chrome extension
+            {setupAction.label}
           </button>
         )}
         {status?.extensionPath && (
@@ -125,9 +127,9 @@ export function GoogleMeetReminderSettings() {
         {busy && <Loader2 className="h-4 w-4 animate-spin text-gray-500" />}
       </div>
 
-      {status?.extensionPath && (
-        <p className="mt-3 break-all text-xs text-gray-500">
-          Chrome extension folder: {status.extensionPath}
+      {setupAction?.visible && status?.extensionPath && (
+        <p className="mt-3 text-xs text-gray-500">
+          After Chrome confirms the installation, this status changes to Connected automatically.
         </p>
       )}
       {error && <p className="mt-3 text-sm text-red-600">{error}</p>}

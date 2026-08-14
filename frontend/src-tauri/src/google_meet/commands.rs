@@ -2,6 +2,7 @@ use super::protocol::MeetEvent;
 use super::registration::{
     chrome_host_manifest_path, manifest_is_owned, read_preferences, remove_owned_host_manifest,
     replace_directory_atomically, write_host_manifest, write_preferences, IntegrationPreferences,
+    CHROME_WEB_STORE_URL,
 };
 use super::window::{self, ReminderPayload};
 use super::GoogleMeetState;
@@ -92,15 +93,12 @@ pub fn install_google_meet_integration(
 
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("open")
-            .arg("-R")
-            .arg(destination.join("manifest.json"))
-            .spawn();
-        let _ = Command::new("open")
+        Command::new("open")
             .arg("-a")
             .arg("Google Chrome")
-            .arg("chrome://extensions")
-            .spawn();
+            .arg(CHROME_WEB_STORE_URL)
+            .spawn()
+            .map_err(|error| format!("Failed to open Chrome Web Store: {error}"))?;
     }
 
     integration_status(&app)
@@ -249,7 +247,7 @@ pub async fn start_google_meet_recording(
         .map_err(|error| error.to_string())?;
     let main = app
         .get_webview_window("main")
-        .ok_or_else(|| "Meetily main window is unavailable".to_string())?;
+        .ok_or_else(|| "Record Only main window is unavailable".to_string())?;
     let session_json = serde_json::to_string(&session_id).map_err(|error| error.to_string())?;
     if let Err(error) = main.eval(format!(
         "sessionStorage.setItem('googleMeetStartSession', {session_json});sessionStorage.setItem('autoStartRecording','true');window.location.assign('/');"
@@ -353,7 +351,7 @@ pub fn dismiss_google_meet_test_reminder(app: tauri::AppHandle) -> Result<(), St
 pub fn open_meetily_from_reminder(app: tauri::AppHandle) -> Result<(), String> {
     let main = app
         .get_webview_window("main")
-        .ok_or_else(|| "Meetily main window is unavailable".to_string())?;
+        .ok_or_else(|| "Record Only main window is unavailable".to_string())?;
     main.show().map_err(|error| error.to_string())?;
     main.set_focus().map_err(|error| error.to_string())?;
     window::hide(&app)

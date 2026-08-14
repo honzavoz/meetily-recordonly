@@ -77,6 +77,21 @@ export interface GoogleMeetIntegrationStatus {
   lastSeenAt: string | null;
 }
 
+export interface IntegrationSetupAction {
+  visible: boolean;
+  label: 'Install in Chrome' | 'Open Chrome Web Store';
+}
+
+export function integrationSetupAction(
+  status: GoogleMeetIntegrationStatus,
+): IntegrationSetupAction {
+  const connected = integrationStatusLabel(status) === 'Connected';
+  return {
+    visible: !connected,
+    label: status.extensionPath ? 'Open Chrome Web Store' : 'Install in Chrome',
+  };
+}
+
 export function integrationStatusLabel(status: GoogleMeetIntegrationStatus): string {
   if (!status.extensionPath) return 'Not installed';
   if (status.enabled && status.nativeHostRegistered && status.lastSeenAt) return 'Connected';

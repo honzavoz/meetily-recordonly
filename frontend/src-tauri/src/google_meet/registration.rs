@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 pub const NATIVE_HOST_NAME: &str = "cz.honzavoz.meetily.recordonly.google_meet";
 pub const EXTENSION_ID: &str = "fonilmfiddnidgjpcijiocffkbbeaddo";
 pub const EXTENSION_ORIGIN: &str = "chrome-extension://fonilmfiddnidgjpcijiocffkbbeaddo/";
+pub const CHROME_WEB_STORE_URL: &str =
+    "https://chromewebstore.google.com/detail/fonilmfiddnidgjpcijiocffkbbeaddo";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -17,7 +19,7 @@ pub struct IntegrationPreferences {
 pub fn build_host_manifest(executable: &Path) -> Value {
     json!({
         "name": NATIVE_HOST_NAME,
-        "description": "Meetily Google Meet recording reminder",
+        "description": "Record Only Google Meet recording reminder",
         "path": executable,
         "type": "stdio",
         "allowed_origins": [EXTENSION_ORIGIN],
@@ -157,6 +159,14 @@ mod tests {
             serde_json::json!([EXTENSION_ORIGIN])
         );
         assert_eq!(value["path"], executable.to_string_lossy().as_ref());
+    }
+
+    #[test]
+    fn web_store_url_targets_the_allowed_extension() {
+        assert_eq!(
+            CHROME_WEB_STORE_URL,
+            format!("https://chromewebstore.google.com/detail/{EXTENSION_ID}")
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   GoogleMeetIntegrationStatus,
   ReminderOperationGate,
+  integrationSetupAction,
   integrationStatusLabel,
   isGoogleMeetReminderRoute,
   reduceReminderState,
@@ -45,4 +46,21 @@ test.each([
   [{ enabled: true, extensionPath: '/extension', nativeHostRegistered: false, lastSeenAt: null }, 'Needs attention'],
 ] satisfies [GoogleMeetIntegrationStatus, string][])('maps integration status to %s', (status, label) => {
   expect(integrationStatusLabel(status)).toBe(label);
+});
+
+test.each([
+  [
+    { enabled: false, extensionPath: null, nativeHostRegistered: false, lastSeenAt: null },
+    { visible: true, label: 'Install in Chrome' },
+  ],
+  [
+    { enabled: true, extensionPath: '/extension', nativeHostRegistered: true, lastSeenAt: null },
+    { visible: true, label: 'Open Chrome Web Store' },
+  ],
+  [
+    { enabled: true, extensionPath: '/extension', nativeHostRegistered: true, lastSeenAt: '2026-08-13T12:00:00Z' },
+    { visible: false, label: 'Open Chrome Web Store' },
+  ],
+] satisfies [GoogleMeetIntegrationStatus, { visible: boolean; label: string }][])('offers a retryable one-click setup action', (status, action) => {
+  expect(integrationSetupAction(status)).toEqual(action);
 });

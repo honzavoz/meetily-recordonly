@@ -1,44 +1,47 @@
-# Building Meetily from Source
+# Building Record Only from Source
 
-This guide provides detailed instructions for building Meetily from source on different operating systems.
+This guide provides build instructions for Record Only on each supported operating system. Record Only is an independent fork of Meetily Community Edition and is not endorsed by Zackriya Solutions.
 
-## Google Meet reminder pilot on macOS
+The transition release keeps the technical macOS bundle name `Meetily.app`, executable name, application-data directories, bundle identifier, native-host identifier, and updater channel. These compatibility values preserve installed data and allow existing users to update in place. User-facing product copy uses Record Only.
 
-Meetily includes a privacy-limited Chrome extension that detects only whether a Google Meet call has started or ended. It does not read or send participant names, meeting titles, chat, captions, audio, video, the meeting URL, or its meeting code.
+## Google Meet reminder on macOS
 
-One-time setup:
+Record Only includes a privacy-limited Chrome extension that detects only whether a Google Meet call has started or ended. It does not read or send participant names, meeting titles, chat, captions, audio, video, the meeting URL, or its meeting code.
 
-1. Install and open the current Meetily application.
-2. Open **Settings → General → Google Meet reminder** and select **Set up Chrome extension**.
-3. Meetily opens `chrome://extensions` and reveals the extension folder in Finder.
-4. Enable **Developer mode**, select **Load unpacked**, and choose the revealed folder.
-5. Return to Meetily. The status should be **Connected**; use **Test reminder** to verify the reminder window without starting a recording.
+User setup:
 
-The pilot uses a fixed extension identity. Chrome communicates with Meetily through the native-host manifest at:
+1. Install and open the current Record Only application.
+2. Open **Settings → General → Google Meet reminder** and select **Install in Chrome**.
+3. Confirm Chrome's standard extension installation dialog.
+4. Return to Record Only. The status changes to **Connected** automatically; use **Test reminder** to verify the reminder window without starting a recording.
+
+Chrome communicates with Record Only through the compatibility native-host manifest at:
 
 ```text
 ~/Library/Application Support/Google/Chrome/NativeMessagingHosts/cz.honzavoz.meetily.recordonly.google_meet.json
 ```
 
-Disabling the integration removes only a manifest owned by the current Meetily installation. It keeps the unpacked extension directory so the integration can be enabled again without reloading it in Chrome. To uninstall completely, disable the integration in Meetily and remove the extension on `chrome://extensions`.
+Disabling the integration removes only the manifest owned by the current Record Only installation. To uninstall completely, disable the integration in Record Only and remove the extension in Chrome.
+
+For local extension development only, run `bun scripts/build-chrome-extension.ts`, open `chrome://extensions`, enable Developer mode, and load `chrome-extension/dist` as an unpacked extension. End users should install the reviewed Chrome Web Store build instead.
 
 Real-call acceptance test:
 
-1. Keep Meetily running in the menu bar, with no recording active.
+1. Keep Record Only running in the menu bar, with no recording active.
 2. Join a disposable Google Meet call in Chrome and wait three seconds.
-3. Confirm one reminder appears and **Start recording** begins a single Meetily recording.
+3. Confirm one reminder appears and **Start recording** begins one Record Only recording.
 4. Keep the call open for at least one minute and confirm no duplicate reminder appears.
 5. Leave the call and confirm **Stop and save** or **Keep recording** appears only for a recording started by this reminder.
 6. Stop and save, then verify the recording is playable and existing meetings are unchanged.
 
-An exclamation badge on the extension means its native connection needs attention. Re-enable the integration from Meetily settings, then reload the extension if the badge remains.
+An exclamation badge on the extension means its native connection needs attention. Re-enable the integration from Record Only settings, then reload the extension if the badge remains.
 
 <details>
 <summary>Linux</summary>
 
 ## 🐧 Building on Linux
 
-This guide helps you build Meetily on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
+This guide helps you build Record Only on Linux with **automatic GPU acceleration**. The build system detects your hardware and configures the best performance automatically.
 
 ---
 
