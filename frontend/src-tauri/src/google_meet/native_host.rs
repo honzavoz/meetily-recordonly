@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 const MAX_MESSAGE_BYTES: usize = 16 * 1024;
 
@@ -20,8 +19,8 @@ pub enum NativeHostError {
     Protocol(#[from] super::protocol::ProtocolError),
     #[error("failed to launch Record Only: {0}")]
     Launch(String),
-    #[error("Record Only did not acknowledge the event in time")]
-    DeliveryTimeout,
+    #[error("failed to queue Google Meet event: {0}")]
+    Queue(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,43 +85,45 @@ pub fn write_message(
     Ok(())
 }
 
-fn ack_path() -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "meetily-google-meet-ack-{}.json",
-        uuid::Uuid::new_v4()
-    ))
-}
-
 fn deliver(event: &MeetEvent) -> Result<NativeHostResponse, NativeHostError> {
     let executable = std::env::current_exe()?;
-    let payload = serde_json::to_string(event)?;
-    let acknowledgement = ack_path();
-    Command::new(executable)
-        .arg("--google-meet-event")
-        .arg(payload)
-        .arg("--google-meet-ack")
-        .arg(&acknowledgement)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| NativeHostError::Launch(error.to_string()))?;
+    deliver_with(
+        event,
+        |event| {
+            super::event_queue::enqueue(event)
+                .map_err(|error| NativeHostError::Queue(error.to_string()))
+        },
+        || {
+            Command::new(executable)
+                .arg("--google-meet-pending")
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| NativeHostError::Launch(error.to_string()))
+        },
+    )
+}
 
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while Instant::now() < deadline {
-        if let Ok(data) = std::fs::read(&acknowledgement) {
-            let _ = std::fs::remove_file(&acknowledgement);
-            let ack: DeliveryAck = serde_json::from_slice(&data)?;
-            return Ok(NativeHostResponse {
-                accepted: ack.accepted,
-                recording: ack.recording,
-                app_version: env!("CARGO_PKG_VERSION").to_string(),
-                error_code: ack.error_code,
-            });
-        }
-        std::thread::sleep(Duration::from_millis(50));
+fn deliver_with<Enqueue, Launch>(
+    event: &MeetEvent,
+    enqueue: Enqueue,
+    launch: Launch,
+) -> Result<NativeHostResponse, NativeHostError>
+where
+    Enqueue: FnOnce(&MeetEvent) -> Result<PathBuf, NativeHostError>,
+    Launch: FnOnce() -> Result<(), NativeHostError>,
+{
+    let queued_path = enqueue(event)?;
+    if let Err(error) = launch() {
+        let _ = std::fs::remove_file(queued_path);
+        return Err(error);
     }
-    Err(NativeHostError::DeliveryTimeout)
+    Ok(NativeHostResponse::accepted(
+        false,
+        env!("CARGO_PKG_VERSION"),
+    ))
 }
 
 pub fn write_delivery_ack(path: &Path, ack: &DeliveryAck) -> Result<(), String> {
@@ -195,5 +196,59 @@ mod tests {
         write_message(&mut output, &NativeHostResponse::accepted(false, "0.4.14")).unwrap();
         let length = u32::from_le_bytes(output[..4].try_into().unwrap()) as usize;
         assert_eq!(length, output.len() - 4);
+    }
+
+    #[test]
+    fn delivery_enqueues_and_signals_without_waiting_for_a_gui_ack() {
+        let event: MeetEvent = serde_json::from_str(
+            r#"{"protocolVersion":1,"extensionVersion":"0.1.1","event":"integration_ping","sessionId":"550e8400-e29b-41d4-a716-446655440000","sequence":1,"occurredAt":"2026-08-14T20:00:00Z"}"#,
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let queued_path = temp.path().join("queued.json");
+        let enqueued = std::cell::RefCell::new(Vec::new());
+        let launches = std::cell::Cell::new(0);
+
+        let response = deliver_with(
+            &event,
+            |event| {
+                enqueued.borrow_mut().push(event.clone());
+                std::fs::write(&queued_path, b"queued").unwrap();
+                Ok(queued_path.clone())
+            },
+            || {
+                launches.set(launches.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        assert!(response.accepted);
+        assert!(!response.recording);
+        assert_eq!(enqueued.borrow().as_slice(), &[event]);
+        assert_eq!(launches.get(), 1);
+        assert!(queued_path.exists());
+    }
+
+    #[test]
+    fn delivery_removes_the_new_queue_item_when_signalling_fails() {
+        let event: MeetEvent = serde_json::from_str(
+            r#"{"protocolVersion":1,"extensionVersion":"0.1.1","event":"integration_ping","sessionId":"550e8400-e29b-41d4-a716-446655440000","sequence":1,"occurredAt":"2026-08-14T20:00:00Z"}"#,
+        )
+        .unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let queued_path = temp.path().join("queued.json");
+
+        let result = deliver_with(
+            &event,
+            |_| {
+                std::fs::write(&queued_path, b"queued").unwrap();
+                Ok(queued_path.clone())
+            },
+            || Err(NativeHostError::Launch("signal failed".into())),
+        );
+
+        assert!(matches!(result, Err(NativeHostError::Launch(_))));
+        assert!(!queued_path.exists());
     }
 }

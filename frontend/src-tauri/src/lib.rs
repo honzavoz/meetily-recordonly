@@ -581,6 +581,13 @@ pub fn run() {
                 cwd
             );
 
+            if google_meet::protocol::is_pending_event_invocation(&args) {
+                if let Err(error) = google_meet::commands::drain_pending_events(app) {
+                    log::error!("Failed to drain signalled Google Meet events: {error}");
+                }
+                return;
+            }
+
             match google_meet::protocol::parse_google_meet_event_arg(&args) {
                 Ok(Some(event)) => {
                     let ack_path = google_meet::protocol::parse_google_meet_ack_arg(&args)
@@ -614,23 +621,23 @@ pub fn run() {
         .setup(|_app| {
             log::info!("Application setup complete");
 
-            let initial_meet_event = match google_meet::protocol::parse_google_meet_event_arg(
-                &std::env::args().collect::<Vec<_>>(),
-            ) {
-                Ok(event) => event,
-                Err(error) => {
-                    log::warn!("Rejected initial Google Meet launch event: {error}");
+            let launch_args = std::env::args().collect::<Vec<_>>();
+            let initial_meet_pending =
+                google_meet::protocol::is_pending_event_invocation(&launch_args);
+            let initial_meet_event =
+                match google_meet::protocol::parse_google_meet_event_arg(&launch_args) {
+                    Ok(event) => event,
+                    Err(error) => {
+                        log::warn!("Rejected initial Google Meet launch event: {error}");
+                        None
+                    }
+                };
+            let initial_meet_ack = google_meet::protocol::parse_google_meet_ack_arg(&launch_args)
+                .unwrap_or_else(|error| {
+                    log::warn!("Rejected initial Google Meet acknowledgement path: {error}");
                     None
-                }
-            };
-            let initial_meet_ack = google_meet::protocol::parse_google_meet_ack_arg(
-                &std::env::args().collect::<Vec<_>>(),
-            )
-            .unwrap_or_else(|error| {
-                log::warn!("Rejected initial Google Meet acknowledgement path: {error}");
-                None
-            });
-            if initial_meet_event.is_some() {
+                });
+            if initial_meet_pending || initial_meet_event.is_some() {
                 if let Some(main_window) = _app.get_webview_window("main") {
                     let _ = main_window.hide();
                 }
@@ -639,6 +646,11 @@ pub fn run() {
             if let Err(error) = google_meet::commands::refresh_installed_integration(_app.handle())
             {
                 log::warn!("Failed to refresh Google Meet integration: {error}");
+            }
+            if initial_meet_pending {
+                if let Err(error) = google_meet::commands::drain_pending_events(_app.handle()) {
+                    log::error!("Failed to drain initial Google Meet events: {error}");
+                }
             }
             if let Some(event) = initial_meet_event {
                 google_meet::commands::dispatch_event(

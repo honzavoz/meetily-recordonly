@@ -8,7 +8,7 @@ use super::window::{self, ReminderPayload};
 use super::GoogleMeetState;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::{Manager, State};
 use uuid::Uuid;
@@ -137,46 +137,83 @@ pub fn get_google_meet_integration_status(
     integration_status(&app)
 }
 
+async fn process_event(app: &tauri::AppHandle, event: MeetEvent, ack_path: Option<PathBuf>) {
+    let recording = crate::is_recording().await;
+    let is_ping = event.event == super::protocol::MeetEventKind::IntegrationPing;
+    let decision = if is_ping {
+        Ok(super::coordinator::Decision::None)
+    } else {
+        app.state::<GoogleMeetState>()
+            .coordinator
+            .lock()
+            .map_err(|error| error.to_string())
+            .and_then(|mut coordinator| {
+                coordinator
+                    .accept(event, recording, Utc::now())
+                    .map_err(|error| error.to_string())
+            })
+    };
+    let result = match decision {
+        Ok(decision) => window::apply_decision(app, decision),
+        Err(error) => Err(error),
+    };
+    if result.is_ok() {
+        if let Ok(mut last_seen_at) = app.state::<GoogleMeetState>().last_seen_at.lock() {
+            *last_seen_at = Some(Utc::now());
+        }
+    }
+    if let Err(error) = &result {
+        log::warn!("Rejected Google Meet event: {error}");
+    }
+    if let Some(path) = ack_path {
+        let acknowledgement = super::native_host::DeliveryAck {
+            accepted: result.is_ok(),
+            recording,
+            error_code: result.err().map(|_| "event_rejected".to_string()),
+        };
+        if let Err(error) = super::native_host::write_delivery_ack(&path, &acknowledgement) {
+            log::error!("Failed to acknowledge Google Meet event: {error}");
+        }
+    }
+}
+
 pub fn dispatch_event(app: tauri::AppHandle, event: MeetEvent, ack_path: Option<PathBuf>) {
     tauri::async_runtime::spawn(async move {
-        let recording = crate::is_recording().await;
-        let is_ping = event.event == super::protocol::MeetEventKind::IntegrationPing;
-        let decision = if is_ping {
-            Ok(super::coordinator::Decision::None)
-        } else {
-            app.state::<GoogleMeetState>()
-                .coordinator
-                .lock()
-                .map_err(|error| error.to_string())
-                .and_then(|mut coordinator| {
-                    coordinator
-                        .accept(event, recording, Utc::now())
-                        .map_err(|error| error.to_string())
-                })
-        };
-        let result = match decision {
-            Ok(decision) => window::apply_decision(&app, decision),
-            Err(error) => Err(error),
-        };
-        if result.is_ok() {
-            if let Ok(mut last_seen_at) = app.state::<GoogleMeetState>().last_seen_at.lock() {
-                *last_seen_at = Some(Utc::now());
-            }
-        }
-        if let Err(error) = &result {
-            log::warn!("Rejected Google Meet event: {error}");
-        }
-        if let Some(path) = ack_path {
-            let acknowledgement = super::native_host::DeliveryAck {
-                accepted: result.is_ok(),
-                recording,
-                error_code: result.err().map(|_| "event_rejected".to_string()),
-            };
-            if let Err(error) = super::native_host::write_delivery_ack(&path, &acknowledgement) {
-                log::error!("Failed to acknowledge Google Meet event: {error}");
-            }
+        process_event(&app, event, ack_path).await;
+    });
+}
+
+fn dispatch_events(app: tauri::AppHandle, events: Vec<MeetEvent>) {
+    tauri::async_runtime::spawn(async move {
+        for event in events {
+            process_event(&app, event, None).await;
         }
     });
+}
+
+pub fn drain_pending_events_with(
+    queue_dir: &Path,
+    now: DateTime<Utc>,
+    mut dispatch: impl FnMut(MeetEvent),
+) -> Result<usize, String> {
+    let events = super::event_queue::drain_in(queue_dir, now).map_err(|error| error.to_string())?;
+    let count = events.len();
+    for event in events {
+        dispatch(event);
+    }
+    Ok(count)
+}
+
+pub fn drain_pending_events(app: &tauri::AppHandle) -> Result<usize, String> {
+    let mut events = Vec::new();
+    drain_pending_events_with(&super::event_queue::queue_dir(), Utc::now(), |event| {
+        events.push(event)
+    })?;
+    let count = events.len();
+    if count > 0 {
+        dispatch_events(app.clone(), events);
+    }
+    Ok(count)
 }
 
 pub fn start_coordinator_timer(app: tauri::AppHandle) {
@@ -184,6 +221,9 @@ pub fn start_coordinator_timer(app: tauri::AppHandle) {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
         loop {
             interval.tick().await;
+            if let Err(error) = drain_pending_events(&app) {
+                log::error!("Failed to drain queued Google Meet events: {error}");
+            }
             let recording = crate::is_recording().await;
             let backend_starting = crate::is_recording_starting();
             let decisions = match app.state::<GoogleMeetState>().coordinator.lock() {
@@ -355,4 +395,42 @@ pub fn open_meetily_from_reminder(app: tauri::AppHandle) -> Result<(), String> {
     main.show().map_err(|error| error.to_string())?;
     main.set_focus().map_err(|error| error.to_string())?;
     window::hide(&app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::google_meet::protocol::{MeetEventKind, PROTOCOL_VERSION};
+    use chrono::TimeZone;
+
+    fn event(sequence: u64, second: u32) -> MeetEvent {
+        MeetEvent {
+            protocol_version: PROTOCOL_VERSION,
+            extension_version: "0.1.1".into(),
+            event: MeetEventKind::Heartbeat,
+            session_id: Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap(),
+            sequence,
+            occurred_at: Utc.with_ymd_and_hms(2026, 8, 14, 20, 0, second).unwrap(),
+        }
+    }
+
+    #[test]
+    fn drains_only_valid_events_in_protocol_order() {
+        let temp = tempfile::tempdir().unwrap();
+        super::super::event_queue::enqueue_in(temp.path(), &event(2, 2)).unwrap();
+        super::super::event_queue::enqueue_in(temp.path(), &event(1, 1)).unwrap();
+        std::fs::write(temp.path().join("invalid.json"), b"not-json").unwrap();
+        let mut dispatched = Vec::new();
+
+        let count = drain_pending_events_with(
+            temp.path(),
+            Utc.with_ymd_and_hms(2026, 8, 14, 20, 2, 0).unwrap(),
+            |event| dispatched.push(event.sequence),
+        )
+        .unwrap();
+
+        assert_eq!(count, 2);
+        assert_eq!(dispatched, vec![1, 2]);
+        assert_eq!(std::fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
 }

@@ -3,15 +3,18 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import test from 'node:test';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
+const require = createRequire(import.meta.url);
+const { verifyChromeStoreIdentity } = require('../verify-chrome-store-identity.js');
 const verifier = resolve(repositoryRoot, 'scripts/verify-chrome-store-listing.js');
 const releaseWorkflow = readFileSync(
   resolve(repositoryRoot, '.github/workflows/release.yml'),
   'utf8',
 );
-const extensionId = 'fonilmfiddnidgjpcijiocffkbbeaddo';
+const { extensionId } = verifyChromeStoreIdentity();
 const canonicalUrl = `https://chromewebstore.google.com/detail/record-only-meet-reminder/${extensionId}`;
 
 function verifyFixture(html, finalUrl) {

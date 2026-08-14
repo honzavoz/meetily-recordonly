@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod coordinator;
+pub mod event_queue;
 pub mod native_host;
 pub mod protocol;
 pub mod registration;

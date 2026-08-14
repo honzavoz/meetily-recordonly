@@ -10,6 +10,10 @@ pub fn is_native_host_invocation(args: &[String]) -> bool {
         .any(|arg| arg == "--chrome-native-host" || arg == super::registration::EXTENSION_ORIGIN)
 }
 
+pub fn is_pending_event_invocation(args: &[String]) -> bool {
+    args.iter().any(|arg| arg == "--google-meet-pending")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetEventKind {
@@ -180,6 +184,18 @@ mod tests {
         assert!(!is_native_host_invocation(&[
             "Meetily".into(),
             "chrome-extension://untrusted/".into(),
+        ]));
+    }
+
+    #[test]
+    fn recognizes_only_the_explicit_pending_event_signal() {
+        assert!(is_pending_event_invocation(&[
+            "Meetily".into(),
+            "--google-meet-pending".into(),
+        ]));
+        assert!(!is_pending_event_invocation(&[
+            "Meetily".into(),
+            "google-meet-pending".into(),
         ]));
     }
 
