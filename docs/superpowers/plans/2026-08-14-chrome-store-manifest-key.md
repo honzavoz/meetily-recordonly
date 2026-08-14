@@ -267,13 +267,15 @@ git commit -m "fix: omit development key from Store package"
 
 ```bash
 bun test chrome-extension/tests
-node --test scripts/tests/chrome-store-package.test.js scripts/tests/license-packaging.test.js scripts/tests/sync-chrome-store-identity.test.js
+node --test --test-concurrency=1 scripts/tests/chrome-store-package.test.js scripts/tests/license-packaging.test.js scripts/tests/sync-chrome-store-identity.test.js
 bun scripts/build-chrome-extension.ts
 node scripts/verify-chrome-extension.js chrome-extension/dist
 bun scripts/package-chrome-web-store.ts
 ```
 
-Expected: all tests and both development/Store verification commands pass.
+Expected: all tests and both development/Store verification commands pass. The
+Node test files run serially because both packaging suites intentionally rebuild
+the shared ignored `chrome-extension/dist` directory.
 
 - [ ] **Step 2: Prove the ZIP manifest and deterministic checksum**
 
