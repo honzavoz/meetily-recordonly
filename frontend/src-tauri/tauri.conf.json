@@ -1,7 +1,7 @@
 {
     "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
     "productName": "Meetily",
-    "version": "0.4.16",
+    "version": "0.4.17",
     "identifier": "cz.honzavoz.meetily.recordonly",
     "build": {
         "frontendDist": "../out",
