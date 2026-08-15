@@ -54,9 +54,13 @@ test('rejects an unpublished empty-title listing', () => {
   assert.match(result.stderr, /not live/i);
 });
 
-test('release verifies the live listing before creating a draft', () => {
+test('desktop release packages the extension without waiting for Store publication', () => {
+  const identityCheck = releaseWorkflow.indexOf('node scripts/verify-chrome-store-identity.js');
   const listingCheck = releaseWorkflow.indexOf('node scripts/verify-chrome-store-listing.js');
+  const storePackage = releaseWorkflow.indexOf('bun scripts/package-chrome-web-store.ts');
   const draftCreation = releaseWorkflow.indexOf('Find or Create Draft Release');
-  assert.notEqual(listingCheck, -1, 'release does not verify the live Chrome Web Store listing');
-  assert.ok(listingCheck < draftCreation, 'live listing check runs after draft creation');
+  assert.notEqual(identityCheck, -1, 'release does not verify Chrome Store identity');
+  assert.equal(listingCheck, -1, 'desktop release still waits for Store publication');
+  assert.notEqual(storePackage, -1, 'release does not build the reviewed Store package');
+  assert.ok(identityCheck < draftCreation && storePackage < draftCreation);
 });
