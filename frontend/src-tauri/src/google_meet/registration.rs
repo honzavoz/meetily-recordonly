@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 pub const NATIVE_HOST_NAME: &str = "cz.honzavoz.meetily.recordonly.google_meet";
 pub const EXTENSION_ID: &str = "mojclipfmoooddobmohinlnlpmnpjmjf";
 pub const EXTENSION_ORIGIN: &str = "chrome-extension://mojclipfmoooddobmohinlnlpmnpjmjf/";
+pub const LEGACY_EXTENSION_ID: &str = "fonilmfiddnidgjpcijiocffkbbeaddo";
+pub const LEGACY_EXTENSION_ORIGIN: &str =
+    "chrome-extension://fonilmfiddnidgjpcijiocffkbbeaddo/";
 pub const CHROME_WEB_STORE_URL: &str =
     "https://chromewebstore.google.com/detail/mojclipfmoooddobmohinlnlpmnpjmjf";
 
@@ -22,7 +25,7 @@ pub fn build_host_manifest(executable: &Path) -> Value {
         "description": "Record Only Google Meet recording reminder",
         "path": executable,
         "type": "stdio",
-        "allowed_origins": [EXTENSION_ORIGIN],
+        "allowed_origins": [EXTENSION_ORIGIN, LEGACY_EXTENSION_ORIGIN],
     })
 }
 
@@ -33,7 +36,9 @@ pub fn manifest_is_owned(value: &Value, executable: &Path) -> bool {
             .get("allowed_origins")
             .and_then(Value::as_array)
             .is_some_and(|origins| {
-                origins.len() == 1 && origins[0].as_str() == Some(EXTENSION_ORIGIN)
+                origins.len() == 2
+                    && origins[0].as_str() == Some(EXTENSION_ORIGIN)
+                    && origins[1].as_str() == Some(LEGACY_EXTENSION_ORIGIN)
             })
 }
 
@@ -148,6 +153,9 @@ mod tests {
     use super::*;
     use std::fs;
 
+    const EXPECTED_LEGACY_EXTENSION_ORIGIN: &str =
+        "chrome-extension://fonilmfiddnidgjpcijiocffkbbeaddo/";
+
     #[test]
     fn host_manifest_allows_only_the_bundled_extension() {
         let executable = Path::new("/Applications/Meetily.app/Contents/MacOS/meetily");
@@ -156,7 +164,7 @@ mod tests {
         assert_eq!(value["type"], "stdio");
         assert_eq!(
             value["allowed_origins"],
-            serde_json::json!([EXTENSION_ORIGIN])
+            serde_json::json!([EXTENSION_ORIGIN, EXPECTED_LEGACY_EXTENSION_ORIGIN])
         );
         assert_eq!(value["path"], executable.to_string_lossy().as_ref());
     }
@@ -166,6 +174,10 @@ mod tests {
         assert_eq!(
             CHROME_WEB_STORE_URL,
             format!("https://chromewebstore.google.com/detail/{EXTENSION_ID}")
+        );
+        assert_eq!(
+            LEGACY_EXTENSION_ORIGIN,
+            format!("chrome-extension://{LEGACY_EXTENSION_ID}/")
         );
     }
 
@@ -200,5 +212,22 @@ mod tests {
             &build_host_manifest(executable),
             Path::new("/Applications/Other.app/Contents/MacOS/meetily"),
         ));
+
+        let mut missing_legacy_origin = build_host_manifest(executable);
+        missing_legacy_origin["allowed_origins"] = serde_json::json!([EXTENSION_ORIGIN]);
+        assert!(!manifest_is_owned(&missing_legacy_origin, executable));
+
+        let mut reordered_origins = build_host_manifest(executable);
+        reordered_origins["allowed_origins"] =
+            serde_json::json!([EXPECTED_LEGACY_EXTENSION_ORIGIN, EXTENSION_ORIGIN]);
+        assert!(!manifest_is_owned(&reordered_origins, executable));
+
+        let mut additional_origin = build_host_manifest(executable);
+        additional_origin["allowed_origins"] = serde_json::json!([
+            EXTENSION_ORIGIN,
+            EXPECTED_LEGACY_EXTENSION_ORIGIN,
+            "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"
+        ]);
+        assert!(!manifest_is_owned(&additional_origin, executable));
     }
 }
