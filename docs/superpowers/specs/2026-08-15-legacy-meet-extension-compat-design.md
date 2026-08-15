@@ -15,7 +15,7 @@ Record Only extension 0.1.0 used the development identity `fonilmfiddnidgjpcijio
 
 ## Design
 
-The native-host manifest will contain exactly the current Store origin followed by the legacy development origin. Both public keys and extension IDs belong to this project; no wildcard or third-party origin is introduced. The Store URL and bundled extension identity remain tied only to the current Store ID.
+The native-host manifest will contain exactly the current Store origin followed by the legacy development origin. The executable's native-host invocation classifier will recognize those same two exact origins plus the existing explicit `--chrome-native-host` development argument. Both public keys and extension IDs belong to this project; no wildcard or third-party origin is introduced. The Store URL and bundled extension identity remain tied only to the current Store ID.
 
 `manifest_is_owned` will require the exact ordered two-origin allowlist plus the existing host name and executable path. A manifest missing either origin, containing an extra origin, or pointing at another executable will not be considered owned and will not be removed automatically.
 
@@ -26,6 +26,7 @@ The change will be regression-tested in `registration.rs`. Application version 0
 - A generated Chrome native-host manifest allows exactly `mojclipfmoooddobmohinlnlpmnpjmjf` and `fonilmfiddnidgjpcijiocffkbbeaddo`.
 - Store identity verification continues to target only `mojclipfmoooddobmohinlnlpmnpjmjf`.
 - Ownership rejects missing, reordered, or additional origins and a different executable path.
+- Native-host dispatch recognizes both project origins and still rejects unrelated Chrome extension origins.
 - Existing Rust, Chrome, Node, license, version, and release gates pass.
 - The published 0.4.17 updater and installed app pass artifact, signature, license, data-preservation, and native-host checks.
 - An old-origin native messaging event is accepted without restarting Chrome, and a non-recording `meeting_joined` event displays the automatic reminder.

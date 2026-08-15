@@ -14,6 +14,7 @@
 
 **Files:**
 - Modify: `frontend/src-tauri/src/google_meet/registration.rs`
+- Modify: `frontend/src-tauri/src/google_meet/protocol.rs`
 
 - [ ] **Step 1: Change the registration tests first**
 
@@ -43,7 +44,15 @@ Expected: `host_manifest_allows_only_the_bundled_extension` fails because the ge
 
 Add `LEGACY_EXTENSION_ID` and `LEGACY_EXTENSION_ORIGIN`, change `build_host_manifest` to serialize `[EXTENSION_ORIGIN, LEGACY_EXTENSION_ORIGIN]`, and change `manifest_is_owned` to require an array of length two whose entries exactly match that order. Do not change `EXTENSION_ID`, `EXTENSION_ORIGIN`, or `CHROME_WEB_STORE_URL`.
 
-- [ ] **Step 4: Run focused and integration gates**
+- [ ] **Step 4: Write and verify the legacy invocation RED test**
+
+Extend the existing native-host invocation test in `protocol.rs` to require true for `LEGACY_EXTENSION_ORIGIN` and false for an unrelated extension origin. Run the isolated Google Meet protocol harness and require the legacy assertion to fail because only `EXTENSION_ORIGIN` is currently recognized.
+
+- [ ] **Step 5: Implement the minimal invocation classifier change**
+
+Import `LEGACY_EXTENSION_ORIGIN` beside `EXTENSION_ORIGIN` and recognize either exact value in `is_native_host_invocation`. Do not loosen validation to a prefix or wildcard.
+
+- [ ] **Step 6: Run focused and integration gates**
 
 Run:
 
@@ -56,10 +65,10 @@ bun test chrome-extension/tests
 
 Expected: all commands exit zero; Store identity tests continue targeting `mojclipfmoooddobmohinlnlpmnpjmjf`.
 
-- [ ] **Step 5: Commit the compatibility fix**
+- [ ] **Step 7: Commit the compatibility fix**
 
 ```bash
-git add frontend/src-tauri/src/google_meet/registration.rs
+git add frontend/src-tauri/src/google_meet/registration.rs frontend/src-tauri/src/google_meet/protocol.rs docs/superpowers/specs/2026-08-15-legacy-meet-extension-compat-design.md docs/superpowers/plans/2026-08-15-legacy-meet-extension-compat.md
 git commit -m "fix: accept legacy Meet reminder extension"
 ```
 

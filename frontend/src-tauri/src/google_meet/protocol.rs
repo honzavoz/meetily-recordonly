@@ -6,8 +6,11 @@ use uuid::Uuid;
 pub const PROTOCOL_VERSION: u8 = 1;
 
 pub fn is_native_host_invocation(args: &[String]) -> bool {
-    args.iter()
-        .any(|arg| arg == "--chrome-native-host" || arg == super::registration::EXTENSION_ORIGIN)
+    args.iter().any(|arg| {
+        arg == "--chrome-native-host"
+            || arg == super::registration::EXTENSION_ORIGIN
+            || arg == super::registration::LEGACY_EXTENSION_ORIGIN
+    })
 }
 
 pub fn is_pending_event_invocation(args: &[String]) -> bool {
@@ -180,6 +183,10 @@ mod tests {
         assert!(is_native_host_invocation(&[
             "Meetily".into(),
             super::super::registration::EXTENSION_ORIGIN.into(),
+        ]));
+        assert!(is_native_host_invocation(&[
+            "Meetily".into(),
+            super::super::registration::LEGACY_EXTENSION_ORIGIN.into(),
         ]));
         assert!(!is_native_host_invocation(&[
             "Meetily".into(),
