@@ -351,3 +351,17 @@ pnpm tauri:build
 By default, the application will be built with CPU-only processing. To enable GPU acceleration, see the [GPU Acceleration Guide](GPU_ACCELERATION.md).
 
 </details>
+
+## Recording trim checks
+
+The trim tests generate disposable synthetic MP4 audio and require FFmpeg. From the repository root, with native build prerequisites available:
+
+```bash
+FFMPEG_TEST_PATH=/absolute/path/to/ffmpeg cargo test -p meetily --lib audio::recording_trim
+cd frontend
+bun test tests/lib/recording-trim.test.ts tests/lib/transcribe-later.test.ts tests/services/transcribe-later-service.test.ts
+```
+
+If `FFMPEG_TEST_PATH` is omitted, the audio tests use `ffmpeg` from `PATH`. They check the selected audio content and duration, original backups, matching audio aliases, stale inputs, failed FFmpeg execution, and rollback after an failed file replacement.
+
+For native acceptance, record a short disposable clip, trim it using **To Transcribe → Trim recording**, play the result, inspect the original backup, then transcribe it. Also check that invalid ranges are disabled and a concurrent import prevents trimming. The release build continues to run through GitHub Actions.

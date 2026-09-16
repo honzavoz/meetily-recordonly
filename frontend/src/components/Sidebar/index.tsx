@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { Scissors } from 'lucide-react';
+import { TrimRecordingDialog } from '@/components/TrimRecordingDialog';
 import { ChevronDown, ChevronRight, File, Settings, ChevronLeftCircle, ChevronRightCircle, Calendar, Home, Trash2, Mic, Square, Plus, Search, Pencil, NotebookPen, Upload, FileAudio, FolderOpen, Play, Loader2 } from 'lucide-react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSidebar } from './SidebarProvider';
@@ -101,6 +103,7 @@ const Sidebar: React.FC = () => {
   const { openImportDialog } = useImportDialog();
   const { betaFeatures } = useConfig();
   const transcribeLater = useTranscribeLaterRecordings();
+  const [trimRecording, setTrimRecording] = useState<TranscribeLaterRecording | null>(null);
   const appVersion = useAppVersion();
   const hasTranscribeLaterSection = betaFeatures.importAndRetranscribe;
   const hasTranscribeLaterRecordings = transcribeLater.recordings.length > 0;
@@ -1002,6 +1005,15 @@ const Sidebar: React.FC = () => {
                         <Upload className="h-3.5 w-3.5" />
                       </button>
                       <button
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100 disabled:opacity-40"
+                        onClick={() => setTrimRecording(recording)}
+                        disabled={isRecording || !/\.(mp4|m4a)$/i.test(recording.audioPath)}
+                        title="Trim recording"
+                        aria-label="Trim recording"
+                      >
+                        <Scissors className="h-3.5 w-3.5" />
+                      </button>
+                      <button
                         className="flex h-7 w-7 items-center justify-center rounded-md text-gray-600 hover:bg-gray-100"
                         onClick={() => handleTranscribeRenameStart(recording)}
                         disabled={renamingTranscribeRecordingId === recording.id}
@@ -1217,6 +1229,12 @@ const Sidebar: React.FC = () => {
       </div>
 
       {/* Confirmation Modal for Delete */}
+      {trimRecording && <TrimRecordingDialog
+        key={trimRecording.id}
+        recording={trimRecording}
+        onClose={() => setTrimRecording(null)}
+        onRefresh={() => { void transcribeLater.refresh(); }}
+      />}
       <ConfirmationModal
         isOpen={deleteModalState.isOpen}
         text="Are you sure you want to delete this meeting? This action cannot be undone."
