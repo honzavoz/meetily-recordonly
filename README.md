@@ -28,7 +28,7 @@ See [Building Record Only from Source](docs/BUILDING.md) for local extension dev
 
 ## Trim a recording
 
-In **To Transcribe**, select the scissors beside a recording. Enter **Start** and **End** in `hh:mm:ss` format, check the selected duration, and select **Save trimmed recording**. The selected section becomes the recording used for transcription. Audio is copied without re-encoding; cut boundaries can differ by a fraction of a second.
+In **To Transcribe**, select the scissors beside a recording. Play the audio, click the timeline to seek, and drag the two blue handles to choose the section to keep. Use **Set start here** / **Set end here** at the current playback position, or fine-tune **Start** and **End** in `hh:mm:ss` format (optional milliseconds). Zoom in for precise selection in long recordings. **Play selection** previews only the chosen section. Check the selected duration and select **Save trimmed recording**. The selected section becomes the recording used for transcription. Audio is copied without re-encoding; cut boundaries can differ by a fraction of a second.
 
 Each trim keeps the previous audio files and metadata in a separate `.trim-backups/original-*` folder inside the recording folder. Use **Open backup** in the completion message to view it. Backups are retained until you delete the recording folder. Already transcribed meetings and recordings still being captured cannot be trimmed.
 

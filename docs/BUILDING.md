@@ -359,9 +359,9 @@ The trim tests generate disposable synthetic MP4 audio and require FFmpeg. From 
 ```bash
 FFMPEG_TEST_PATH=/absolute/path/to/ffmpeg cargo test -p meetily --lib audio::recording_trim
 cd frontend
-bun test tests/lib/recording-trim.test.ts tests/lib/transcribe-later.test.ts tests/services/transcribe-later-service.test.ts
+bun test tests/lib/recording-trim.test.ts tests/lib/recording-timeline.test.ts tests/lib/transcribe-later.test.ts tests/services/transcribe-later-service.test.ts
 ```
 
 If `FFMPEG_TEST_PATH` is omitted, the audio tests use `ffmpeg` from `PATH`. They check the selected audio content and duration, original backups, matching audio aliases, stale inputs, failed FFmpeg execution, and rollback after an failed file replacement.
 
-For native acceptance, record a short disposable clip, trim it using **To Transcribe → Trim recording**, play the result, inspect the original backup, then transcribe it. Also check that invalid ranges are disabled and a concurrent import prevents trimming. The release build continues to run through GitHub Actions.
+For native acceptance, record a short disposable clip, open **To Transcribe → Trim recording**, play and seek in the original, drag both selection handles, zoom the timeline, and preview the selection through its end. Check that typed times and handles stay synchronized. Save while audio is playing, play the result, inspect the original backup, then transcribe it. Also check that invalid ranges are disabled and a concurrent import prevents trimming. The release build continues to run through GitHub Actions.

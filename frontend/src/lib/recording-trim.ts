@@ -25,3 +25,19 @@ export function getTrimRange(start: string, end: string, duration: number | null
     || startSeconds >= endSeconds || endSeconds > duration) return null;
   return { startSeconds, endSeconds, durationSeconds: endSeconds - startSeconds };
 }
+
+export type TimeRange = [number, number];
+
+export function moveTrimBoundary(range: TimeRange, boundary: 'start' | 'end', time: number, duration: number): TimeRange {
+  const gap = Math.min(0.05, duration / 2, range[1] - range[0]);
+  const position = Math.max(0, Math.min(duration, Math.round(time * 1000) / 1000));
+  return boundary === 'start'
+    ? [Math.max(0, Math.min(position, range[1] - gap)), range[1]]
+    : [range[0], Math.min(duration, Math.max(position, range[0] + gap))];
+}
+
+export function getTimelineWindow(duration: number, center: number, span: number): TimeRange {
+  const width = Math.min(duration, Math.max(Math.min(5, duration), span));
+  const start = Math.max(0, Math.min(duration - width, center - width / 2));
+  return [start, start + width];
+}

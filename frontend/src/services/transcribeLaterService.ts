@@ -3,9 +3,12 @@ import type { TranscribeLaterRecording } from '@/lib/transcribe-later';
 import type { Project } from '@/types/projects';
 
 export class TranscribeLaterService {
-  async getTrimDuration(recording: TranscribeLaterRecording): Promise<number> {
-    const info = await invoke<{ duration_seconds: number }>('validate_audio_file_command', { path: recording.audioPath });
-    return info.duration_seconds;
+  private previewArgs(recording: TranscribeLaterRecording) {
+    return { folderPath: recording.folderPath, audioPath: recording.audioPath, sizeBytes: recording.sizeBytes, modifiedAtMs: recording.modifiedAtMs };
+  }
+
+  async preparePreview(recording: TranscribeLaterRecording): Promise<{ audioPath: string; durationSeconds: number }> {
+    return invoke('prepare_recording_preview', this.previewArgs(recording));
   }
 
   async trim(recording: TranscribeLaterRecording, startSeconds: number, endSeconds: number): Promise<{ durationSeconds: number; backupPath: string }> {
