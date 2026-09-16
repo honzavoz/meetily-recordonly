@@ -14,7 +14,20 @@ use tauri::{AppHandle, Manager, Runtime};
 
 const INDEX_FILE_NAME: &str = "transcribe_later_index.json";
 const METADATA_FILE_NAME: &str = "metadata.json";
-static RECORDING_PROJECT_OPERATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+// Import holds the same guard as file mutations so an audio file cannot change
+// underneath transcription. Keep the guard alive in blocking trim work as well.
+static RECORDING_FILE_OPERATION_LOCK: once_cell::sync::Lazy<
+    std::sync::Arc<tokio::sync::Mutex<()>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Arc::new(tokio::sync::Mutex::new(())));
+
+pub(super) fn try_recording_mutation() -> Result<tokio::sync::OwnedMutexGuard<()>, String> {
+    RECORDING_FILE_OPERATION_LOCK
+        .clone()
+        .try_lock_owned()
+        .map_err(|_| {
+            "A recording is being updated or transcribed. Please wait for it to finish.".to_string()
+        })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -336,7 +349,7 @@ async fn assign_recording_project_serialized(
     folder_path: &Path,
     project: RecordingProject,
 ) -> Result<Vec<RecordingProject>, String> {
-    let _guard = RECORDING_PROJECT_OPERATION_LOCK.lock().await;
+    let _guard = RECORDING_FILE_OPERATION_LOCK.lock().await;
     assign_recording_project(folder_path, project)
 }
 
@@ -344,7 +357,7 @@ async fn remove_recording_project_serialized(
     folder_path: &Path,
     project_id: &str,
 ) -> Result<Vec<RecordingProject>, String> {
-    let _guard = RECORDING_PROJECT_OPERATION_LOCK.lock().await;
+    let _guard = RECORDING_FILE_OPERATION_LOCK.lock().await;
     remove_recording_project(folder_path, project_id)
 }
 
@@ -387,7 +400,7 @@ async fn transfer_recording_projects_serialized(
     folder_path: &Path,
     meeting_id: &str,
 ) -> Result<Vec<RecordingProject>, String> {
-    let _guard = RECORDING_PROJECT_OPERATION_LOCK.lock().await;
+    let _guard = RECORDING_FILE_OPERATION_LOCK.lock().await;
     transfer_recording_projects(pool, folder_path, meeting_id).await
 }
 
@@ -779,6 +792,52 @@ pub async fn play_transcribe_later_recording(audio_path: String) -> Result<(), S
     open_path_with_system(&audio_path)
 }
 
+#[tauri::command]
+pub async fn trim_transcribe_later_recording<R: Runtime>(
+    app: AppHandle<R>,
+    folder_path: String,
+    audio_path: String,
+    start_seconds: f64,
+    end_seconds: f64,
+    size_bytes: u64,
+    modified_at_ms: u64,
+) -> Result<super::recording_trim::TrimResult, String> {
+    let guard = try_recording_mutation()?;
+    let folder = resolve_recording_folder(&app, &folder_path, true).await?;
+    let selected = choose_audio_file(&folder).ok_or("Recording audio no longer exists")?;
+    let requested = PathBuf::from(&audio_path);
+    if requested.canonicalize().map_err(|e| e.to_string())?
+        != selected.canonicalize().map_err(|e| e.to_string())?
+    {
+        return Err("Recording changed. Close this dialog and open Trim again.".to_string());
+    }
+    let index = read_index(&app);
+    if index.entries.get(&audio_path).is_some_and(|entry| {
+        entry.size_bytes == size_bytes
+            && entry.modified_at_ms == modified_at_ms
+            && entry.status != TranscribeLaterStatus::Pending
+    }) {
+        return Err("Recording is no longer pending transcription".to_string());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let ffmpeg = super::ffmpeg::find_ffmpeg_path().ok_or("FFmpeg is unavailable")?;
+        super::recording_trim::trim_recording(
+            &folder,
+            &super::recording_trim::TrimRequest {
+                audio_path: requested,
+                start_seconds,
+                end_seconds,
+                size_bytes,
+                modified_at_ms,
+            },
+            &ffmpeg,
+        )
+    })
+    .await
+    .map_err(|e| format!("Audio trim task failed: {e}"))?
+}
+
 #[cfg(test)]
 mod recording_projects_tests {
     use super::*;
@@ -999,6 +1058,7 @@ pub async fn delete_transcribe_later_recording(
     folder_path: String,
     audio_path: String,
 ) -> Result<(), String> {
+    let _guard = try_recording_mutation()?;
     let folder = ensure_audio_inside_folder(&folder_path, &audio_path)?;
     fs::remove_dir_all(&folder).map_err(|e| format!("Failed to delete recording folder: {}", e))
 }
@@ -1009,6 +1069,7 @@ pub async fn rename_transcribe_later_recording(
     audio_path: String,
     title: String,
 ) -> Result<(), String> {
+    let _guard = try_recording_mutation()?;
     let folder = ensure_audio_inside_folder(&folder_path, &audio_path)?;
     let audio = PathBuf::from(&audio_path)
         .canonicalize()

@@ -189,6 +189,8 @@ jobs:
         run: scripts/build-ffmpeg-lgpl.sh "aarch64-apple-darwin"
 
       - name: Test Rust workspace
+        env:
+          FFMPEG_TEST_PATH: ${{ github.workspace }}/frontend/src-tauri/binaries/ffmpeg-aarch64-apple-darwin
         run: cargo test --workspace --locked
 
       - name: Build Tauri app (with code signing)
