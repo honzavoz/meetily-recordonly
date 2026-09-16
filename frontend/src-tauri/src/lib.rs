@@ -978,6 +978,7 @@ pub fn run() {
             audio::transcribe_later::delete_transcribe_later_recording,
             audio::transcribe_later::rename_transcribe_later_recording,
             audio::transcribe_later::trim_transcribe_later_recording,
+            audio::transcribe_later::prepare_recording_preview,
             // Language preference commands
             set_language_preference,
             // Notification system commands

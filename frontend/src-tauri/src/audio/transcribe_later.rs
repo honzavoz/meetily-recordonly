@@ -838,6 +838,49 @@ pub async fn trim_transcribe_later_recording<R: Runtime>(
     .map_err(|e| format!("Audio trim task failed: {e}"))?
 }
 
+async fn resolve_preview_audio<R: Runtime>(
+    app: &AppHandle<R>, folder_path: &str, audio_path: &str,
+    size_bytes: u64, expected_modified_at_ms: u64,
+) -> Result<PathBuf, String> {
+    let folder = resolve_recording_folder(app, folder_path, true).await?;
+    let audio = choose_audio_file(&folder).ok_or("Recording audio no longer exists")?;
+    let stat = fs::symlink_metadata(&audio).map_err(|e| e.to_string())?;
+    if !stat.file_type().is_file() || audio.parent() != Some(folder.as_path()) {
+        return Err("Recording preview requires a regular audio file".into());
+    }
+    if Path::new(audio_path).canonicalize().map_err(|e| e.to_string())? != audio {
+        return Err("Recording changed. Close this dialog and open Trim again.".into());
+    }
+    if stat.len() != size_bytes || modified_at_ms(&stat) != expected_modified_at_ms {
+        return Err("Recording changed. Close this dialog and open Trim again.".into());
+    }
+    let metadata = read_recording_metadata(&folder)?;
+    if metadata["status"] != "completed" {
+        return Err("Wait for the recording to finish before opening Trim".into());
+    }
+    Ok(audio)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordingPreview {
+    audio_path: String,
+    duration_seconds: f64,
+}
+
+#[tauri::command]
+pub async fn prepare_recording_preview<R: Runtime>(
+    app: AppHandle<R>, folder_path: String, audio_path: String,
+    size_bytes: u64, modified_at_ms: u64,
+) -> Result<RecordingPreview, String> {
+    let audio = resolve_preview_audio(&app, &folder_path, &audio_path, size_bytes, modified_at_ms).await?;
+    let duration_seconds = extract_duration_from_metadata(&audio).map_err(|e| e.to_string())?;
+    // Grant the media element access to this selected file only, including custom
+    // recording folders. Do not broaden the configured filesystem scope.
+    app.asset_protocol_scope().allow_file(&audio).map_err(|e| e.to_string())?;
+    Ok(RecordingPreview { audio_path: audio.to_string_lossy().to_string(), duration_seconds })
+}
+
 #[cfg(test)]
 mod recording_projects_tests {
     use super::*;
