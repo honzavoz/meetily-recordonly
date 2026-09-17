@@ -3538,7 +3538,7 @@ dependencies = [
 
 [[package]]
 name = "meetily"
-version = "0.4.19"
+version = "0.4.20"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3561,6 +3561,8 @@ dependencies = [
  "futures",
  "futures-channel",
  "futures-util",
+ "http 1.4.0",
+ "http-range",
  "infer 0.15.0",
  "lazy_static",
  "log",
@@ -3570,6 +3572,7 @@ dependencies = [
  "objc",
  "once_cell",
  "ort",
+ "percent-encoding",
  "posthog-rs",
  "rand 0.8.6",
  "rayon",

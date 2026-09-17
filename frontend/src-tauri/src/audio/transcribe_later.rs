@@ -875,9 +875,9 @@ pub async fn prepare_recording_preview<R: Runtime>(
 ) -> Result<RecordingPreview, String> {
     let audio = resolve_preview_audio(&app, &folder_path, &audio_path, size_bytes, modified_at_ms).await?;
     let duration_seconds = extract_duration_from_metadata(&audio).map_err(|e| e.to_string())?;
-    // Grant the media element access to this selected file only, including custom
-    // recording folders. Do not broaden the configured filesystem scope.
-    app.asset_protocol_scope().allow_file(&audio).map_err(|e| e.to_string())?;
+    // The dedicated protocol preserves complete media byte ranges for WebKit.
+    // Only this validated recording is authorized, never a whole directory.
+    app.state::<super::recording_preview::RecordingPreviewScope>().allow_file(&audio)?;
     Ok(RecordingPreview { audio_path: audio.to_string_lossy().to_string(), duration_seconds })
 }
 

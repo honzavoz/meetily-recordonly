@@ -39,7 +39,7 @@ export function TrimRecordingDialog({ recording, onClose, onRefresh }: Props) {
       setDuration(seconds);
       setEnd(formatTrimTime(seconds));
       lastSelection.current = [0, seconds];
-      setSource(`${convertFileSrc(preview.audioPath)}?v=${recording.sizeBytes}-${recording.modifiedAtMs}`);
+      setSource(`${convertFileSrc(preview.audioPath, 'recording')}?v=${recording.sizeBytes}-${recording.modifiedAtMs}`);
     }).catch((cause) => {
       if (!cancelled) setError(String(cause));
     }).finally(() => {

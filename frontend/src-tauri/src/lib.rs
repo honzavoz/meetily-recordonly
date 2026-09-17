@@ -604,6 +604,14 @@ pub fn run() {
     }
 
     builder
+        .manage(audio::recording_preview::RecordingPreviewScope::default())
+        .register_asynchronous_uri_scheme_protocol("recording", |context, request, responder| {
+            let app = context.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let scope = app.state::<audio::recording_preview::RecordingPreviewScope>();
+                responder.respond(scope.respond(request));
+            });
+        })
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())

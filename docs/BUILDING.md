@@ -357,7 +357,7 @@ By default, the application will be built with CPU-only processing. To enable GP
 The trim tests generate disposable synthetic MP4 audio and require FFmpeg. From the repository root, with native build prerequisites available:
 
 ```bash
-FFMPEG_TEST_PATH=/absolute/path/to/ffmpeg cargo test -p meetily --lib audio::recording_trim
+FFMPEG_TEST_PATH=/absolute/path/to/ffmpeg cargo test -p meetily --lib audio::recording_
 cd frontend
 bun test tests/lib/recording-trim.test.ts tests/lib/recording-timeline.test.ts tests/lib/transcribe-later.test.ts tests/services/transcribe-later-service.test.ts
 ```
@@ -365,3 +365,5 @@ bun test tests/lib/recording-trim.test.ts tests/lib/recording-timeline.test.ts t
 If `FFMPEG_TEST_PATH` is omitted, the audio tests use `ffmpeg` from `PATH`. They check the selected audio content and duration, original backups, matching audio aliases, stale inputs, failed FFmpeg execution, and rollback after an failed file replacement.
 
 For native acceptance, record a short disposable clip, open **To Transcribe → Trim recording**, play and seek in the original, drag both selection handles, zoom the timeline, and preview the selection through its end. Check that typed times and handles stay synchronized. Save while audio is playing, play the result, inspect the original backup, then transcribe it. Also check that invalid ranges are disabled and a concurrent import prevents trimming. The release build continues to run through GitHub Actions.
+
+Long-recording playback regression: preview an MP4 longer than two hours whose MP4 sample table exceeds 1,024,000 bytes. Verify that metadata loads and playback seeks near the end. The dedicated `recording:` protocol must return each requested byte range in full; truncation causes WebKit media error 4. Tests cover a 1,393,136-byte range, suffix/open ranges, HEAD, invalid requests, and unauthorized/stale files. Keep original recordings unchanged during acceptance.

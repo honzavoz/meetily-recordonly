@@ -25,6 +25,7 @@ pub mod recording_preferences;
 pub mod recording_saver;
 pub mod transcribe_later;
 pub(crate) mod recording_trim;
+pub(crate) mod recording_preview;
 pub(crate) mod metadata;
 pub mod incremental_saver;  // NEW: Incremental audio saving with checkpoints
 pub mod level_monitor;
